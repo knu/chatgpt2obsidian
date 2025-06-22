@@ -1,0 +1,67 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+  ],
+  "schedule": [
+    "before 4am on monday"
+  ],
+  "timezone": "Asia/Tokyo",
+  "labels": [
+    "dependencies",
+  ],
+  "assignees": ["@knu"],
+  "reviewers": ["@knu"],
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 2,
+  "semanticCommits": "enabled",
+  "docker": {
+    "enabled": true,
+    "pinDigests": false,
+  },
+  "dockerfile": {
+    "enabled": true,
+  },
+  "github-actions": {
+    "enabled": true,
+    "pinDigests": false,
+  },
+  "packageRules": [
+    {
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["rubylang/ruby"],
+      "groupName": "Ruby Docker image",
+      "schedule": [
+        "before 4am on monday",
+      ],
+    },
+    {
+      "matchDatasources": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "schedule": [
+        "before 4am on monday",
+      ],
+    },
+    {
+      "matchPackagePatterns": ["^actions/"],
+      "groupName": "GitHub official actions",
+      "automerge": true,
+      "automergeType": "pr",
+    },
+    {
+      "matchPackagePatterns": ["^docker/"],
+      "groupName": "Docker official actions",
+      "automerge": true,
+      "automergeType": "pr",
+    },
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": [
+      "at any time"
+    ],
+  },
+  "lockFileMaintenance": {
+    "enabled": false,
+  }
+}
