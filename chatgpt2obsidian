@@ -1,0 +1,433 @@
+#!/usr/bin/env ruby
+#
+# chatgpt2obsidian - Converts ChatGPT conversations to markdown files for Obsidian
+#
+# Copyright (c) 2025 Akinori Musha
+#
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+# OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+# OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+# SUCH DAMAGE.
+
+require "cgi"
+require "debug" if ENV["DEBUG"]
+require "fileutils"
+require "json"
+require "stringio"
+require "tempfile"
+require "time"
+require "uri"
+require "yaml"
+
+def slugify(str)
+  s = str.gsub(/[\x00-\x1F<>:"\/\\|?*.]/, "_")
+  s.strip!
+  s.gsub!(/\s+/, " ")
+  s.gsub!(/\A\.+/, "_")
+  s
+end
+
+def load_existing_mapping(output_dir)
+  mapping = {}
+  Dir.glob(File.join(output_dir, "*.md")) do |file|
+    text = File.read(file, 16384).force_encoding(Encoding::UTF_8).scrub("")
+    yaml_body = text[/\A---\n.*?(?:^---\n|\z)/m]
+    next unless yaml_body
+
+    front = YAML.safe_load(yaml_body)
+    cid = front["conversation_id"]
+    mapping[cid] = file if cid
+  rescue StandardError => e
+    warn "Failed to parse frontmatter in #{file}: #{e.message}"
+  end
+  mapping
+end
+
+module MD
+  module_function
+
+  def escape_link_text(text)
+    text.strip.gsub(/([\\\[\]*_`~\n])/, '\\\\\\1')
+  end
+
+  def escape_href(href)
+    if href.match?(/\A(?<p>(?:(?~[()])|\(\g<p>\))*)\z/)
+      href
+    else
+      href.gsub(/[()]+/) { CGI.escape(it) }
+    end
+  end
+
+  def escape_title(title)
+    title = title.strip
+
+    if title.match?(/[\\'"()\n]/)
+      escaped = title
+        .gsub(/([\\"])/, "\\\\\\1")
+        .gsub(/\n(?:[ \f\r\t\v]*\n)+/, "\n")
+
+      "\"#{escaped}\""
+    else
+      title
+    end
+  end
+
+  def linked_text(text:, href:, title: nil)
+    if title
+      "[#{escape_link_text(text)}](#{escape_href(href)} #{escape_title(title)})"
+    else
+      "[#{escape_link_text(text)}](#{escape_href(href)})"
+    end
+  end
+
+  def image(src:, alt: nil, title: nil)
+    "!#{linked_text(text: alt || "", href: src, title: title)}"
+  end
+
+  def linked_image(src:, href:, alt: nil, title: nil, link_title: nil)
+    if link_title
+      "[#{image(alt: alt, src: src, title: title)}](#{escape_href(href)} #{escape_title(link_title)})"
+    else
+      "[#{image(alt: alt, src: src, title: title)}](#{escape_href(href)})"
+    end
+  end
+end
+
+class BufferedPrinter < StringIO
+  attr_reader :device, :indent
+
+  def initialize(device)
+    super()
+    @device = device
+    @indent = []
+  end
+
+  def indent(str, &block)
+    @indent.unshift(str)
+    if block
+      begin
+        yield
+      ensure
+        dedent
+      end
+    end
+    self
+  end
+
+  def dedent
+    @indent.shift
+    self
+  end
+
+  def puts(*lines)
+    if @indent.empty?
+      super
+    elsif lines.empty?
+      super @indent.join
+    else
+      super lines.flatten.flat_map { it.split(/^/).map { "#{@indent.join}#{it}" } }
+    end
+  end
+
+  def flush
+    @device.write(string)
+    self.string = ""
+  end
+end
+
+def main
+  unless ARGV.size == 2
+    warn "Usage: #{$0} <input_json> <output_directory>"
+    exit 1
+  end
+
+  input_file, output_dir = ARGV
+  data = JSON.parse(File.read(input_file), symbolize_names: true)
+  FileUtils.mkdir_p(output_dir)
+
+  existing = load_existing_mapping(output_dir)
+  used_basenames = {}
+
+  data.each do |conversation|
+    conversation => { title: page_title, conversation_id:, create_time:, update_time: }
+    created = Time.at(create_time).getlocal.iso8601
+    updated = Time.at(update_time).getlocal.iso8601
+    conversation_url = "https://chat.openai.com/c/#{conversation_id}"
+
+    mapping = conversation[:mapping] || {}
+    root_id = mapping.find { |_, v| v[:parent].nil? }&.first
+    next unless root_id
+
+    order = []
+    traverse = ->(node) {
+      (mapping[node][:children] || []).each do |child|
+        child = child.to_sym
+        order << child
+        traverse.call(child)
+      end
+    }
+    traverse.call(root_id.to_sym)
+
+    Tempfile.create(["chatgpt_", ".md"]) do |md|
+      md.puts YAML.dump({
+        "title"            => page_title,
+        "created"          => created,
+        "updated"          => updated,
+        "conversation_id"  => conversation_id,
+        "conversation_url" => conversation_url
+      })
+      md.puts "---"
+
+      role = last_role = nil
+
+      order.each do |msg_id|
+        entry = mapping[msg_id]
+        entry => { message: { author:, content:, metadata:, recipient: } }
+        author => { role: }
+        content => { content_type: }
+
+        case content_type
+        when "user_editable_context"
+          next
+        end
+
+        buf = BufferedPrinter.new(md)
+        buf.puts if last_role
+
+        case role
+        in "user"
+          if last_role != "user"
+            buf.puts "# User"
+          end
+        in "assistant"
+          if last_role in "user" | nil
+            buf.puts "# ChatGPT"
+          end
+        in "tool"
+          case metadata
+          in { search_result_groups: }
+            buf.indent("> ") do
+              buf.puts "[!abstract]- Search Results"
+              search_result_groups.each do |group|
+                group => { type: "search_result_group", domain:, entries: }
+
+                buf.indent("> ") do
+                  buf.puts "[!info] #{domain}"
+
+                  entries.each do |entry|
+                    entry => { type: "search_result", title:, url: }
+                    buf.puts "- " + MD.linked_text(text: title, href: url)
+                  end
+                end
+
+                buf.puts
+              end
+            end
+
+            buf.puts
+          in { async_task_type: "research", async_task_title:, async_task_prompt: }
+            buf.indent("> ")
+            buf.puts "[!abstract]- #{async_task_title}"
+            buf.puts async_task_prompt
+          in { finished_text: } if (headline = metadata[:summarization_headline] || metadata[:initial_text])
+            case content
+            in { content_type: "text", parts: } if parts.any?(/./)
+              buf.indent("> ")
+              buf.puts "[!abstract]- #{headline}"
+              buf.puts finished_text
+            else
+              next
+            end
+          in _ if author in { name: "web.search" }
+            web_search = true
+          in _ if metadata in { is_visually_hidden_from_conversation: true }
+            next
+          in _ if author in { name: "bio" | "canmore.create_textdoc" | "canmore.update_textdoc" }
+            next
+          in _ if content in { content_type: "execution_output" }
+            next
+          else
+            # ok
+          end
+        in "system"
+          next if metadata in { is_visually_hidden_from_conversation: true }
+
+          pp entry
+          raise "Unexpected system message with unhidden content: #{page_title}"
+        else
+          pp entry
+          raise "Unknown role `#{role}`: #{page_title}"
+        end
+
+        case content_type
+        in "text"
+          if web_search
+            buf.indent("> ") do
+              buf.puts "[!info]- Web Search"
+              buf.puts content.fetch(:parts).reject(&:empty?)
+            end
+          else
+            case recipient
+            in "all" | "bio"
+              buf.puts content.fetch(:parts).reject(&:empty?)
+            else
+              next
+            end
+          end
+        in "multimodal_text"
+          metadata => { attachments: }
+
+          content.fetch(:parts).each do |part|
+            case part
+            in String
+              buf.puts part
+            in { content_type: "image_asset_pointer", asset_pointer: }
+              uri = URI(asset_pointer)
+              case uri.scheme
+              in "file-service"
+                file_id = uri.host
+                attachments.find { it[:id] == file_id } => { name: file_name }
+                file_name_with_id = "#{file_id}-#{file_name}"
+                source_path = File.join(File.dirname(input_file), file_name_with_id)
+                target_dir = File.join(output_dir, "attachments")
+                target_path = File.join(target_dir, file_name_with_id)
+                unless File.exist?(target_path) && FileUtils.identical?(source_path, target_path)
+                  FileUtils.mkdir_p(target_dir)
+                  FileUtils.cp(source_path, target_path, verbose: true)
+                end
+                buf.puts MD.image(src: "attachments/#{file_name_with_id}")
+              end
+            else
+              raise "Unknown part type: #{part.inspect}: #{page_title}"
+            end
+          end
+        in "app_pairing_content"
+          metadata => { app_pairing: { shared_workspaces: } }
+
+          shared_workspaces.each do |workspace|
+            workspace => { id: workspace_id, app_name:, title: }
+            content => { context_parts:, custom_instructions: }
+
+            if context_parts
+              context_part = context_parts.find { |part| part[:workspace_id] == workspace_id }
+              context_part => { text: }
+            else
+              custom_instructions => /./ => text
+            end
+
+            buf.indent("> ") do
+              buf.puts "[!quote]- Looked at #{app_name}"
+              buf.puts "#### #{title}"
+              buf.puts "```"
+              buf.puts text
+              buf.puts "```"
+            end
+
+            buf.puts
+          end
+        in "sonic_webpage"
+          content => { url:, title:, domain:, text: }
+          buf.indent("> ") do
+            buf.puts "[!info]- Web Search: #{domain}"
+            buf.puts "#### #{MD.linked_text(text: title, href: url)}"
+            buf.puts text
+          end
+
+          buf.puts
+        in "thoughts"
+          content => { thoughts: }
+          buf.indent("> ") do
+            buf.puts "[!abstract]- Thoughts"
+            thoughts.each do |thought|
+              buf.puts "- #{thought.fetch(:content)}"
+            end
+          end
+
+          buf.puts
+        in "code"
+          case metadata
+          in { search_queries: }
+            buf.indent("> ") do
+              queries = search_queries.map { |search_query|
+                search_query => { type: "search", q: }
+                "[#{q}]"
+              }.join(" ")
+
+              buf.puts "[!info]- Web Search: #{queries}"
+              buf.puts
+            end
+          else
+            next
+          end
+        in "reasoning_recap"
+          buf.indent("> ") do
+            buf.puts "[!info]- #{content.fetch(:content)}"
+          end
+        in "app_pairing_content"
+          next
+        else
+          pp entry
+          raise "Unknown content type `#{content_type}`: #{page_title}"
+        end
+
+        buf.flush
+        last_role = role
+      end
+
+      basename =
+        case slugify(page_title)
+        in /./ => str
+          str
+        else
+          conversation_id
+        end
+
+      original_basename = basename
+      counter = 1
+      while used_basenames.key?(basename) && used_basenames[basename] != conversation_id
+        basename = "#{original_basename}_#{counter}"
+        counter += 1
+      end
+      used_basenames[basename] = conversation_id
+
+      target = File.join(output_dir, "#{basename}.md")
+
+      if existing.key?(conversation_id)
+        old_path = existing[conversation_id]
+        unless File.exist?(target) && FileUtils.identical?(old_path, target)
+          FileUtils.mv(old_path, target)
+        end
+      end
+
+      md.flush
+      md.close
+
+      # File.write(target.sub(/\.md\z/, ".json"), JSON.pretty_generate(conversation))
+
+      if !File.exist?(target) || !FileUtils.identical?(md.path, target)
+        FileUtils.cp(md.path, target)
+        puts "Written #{target}"
+      end
+    end
+  end
+end
+
+main if __FILE__ == $0
