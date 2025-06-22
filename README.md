@@ -37,16 +37,29 @@ cd chatgpt2obsidian
 - `<conversations.json>`: Path to the conversations.json file from your ChatGPT export
 - `<output_directory>`: Directory where markdown files will be created
 
+### Options
+
+- `-a, --attachments-subdirectory NAME`: Specify custom attachments subdirectory name (default: "attachments")
+- `-h, --help`: Show help message
+
 ### Docker
 
 ```sh
-docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdir:/output akinori/chatgpt2obsidian /input/conversations.json /output
+# Basic usage
+docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian /input/conversations.json /output
+
+# With custom attachments subdirectory
+docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian --attachments-subdirectory images /input/conversations.json /output
 ```
 
-### Example
+### Examples
 
 ```sh
-./chatgpt2obsidian conversations.json /path/to/vault/subdir
+# Basic usage
+./chatgpt2obsidian conversations.json /path/to/vault/subdirectory
+
+# With custom attachments subdirectory
+./chatgpt2obsidian --attachments-subdirectory images conversations.json /path/to/vault/subdirectory
 ```
 
 ## ChatGPT Export Process
@@ -75,7 +88,7 @@ The output is structured to be compatible with Obsidian's note-taking system, al
 Each markdown file is named after the conversation title, sanitized for filesystem compatibility, and includes all relevant metadata.
 
 ```
-/path/to/vault/subdir/
+/path/to/vault/subdirectory/
 ├── conversation_title_1.md
 ├── conversation_title_2.md
 ├── attachments/
