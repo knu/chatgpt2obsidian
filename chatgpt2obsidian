@@ -307,13 +307,17 @@ def main
                 attachments.find { it[:id] == file_id } => { name: file_name }
                 file_name_with_id = "#{file_id}-#{file_name}"
                 source_path = File.join(File.dirname(input_file), file_name_with_id)
-                target_dir = File.join(output_dir, "attachments")
-                target_path = File.join(target_dir, file_name_with_id)
-                unless File.exist?(target_path) && FileUtils.identical?(source_path, target_path)
-                  FileUtils.mkdir_p(target_dir)
-                  FileUtils.cp(source_path, target_path, verbose: true)
+                if File.exist?(source_path)
+                  target_dir = File.join(output_dir, "attachments")
+                  target_path = File.join(target_dir, file_name_with_id)
+                  unless File.exist?(target_path) && FileUtils.identical?(source_path, target_path)
+                    FileUtils.mkdir_p(target_dir)
+                    FileUtils.cp(source_path, target_path, verbose: true)
+                  end
+                  buf.puts MD.image(src: "attachments/#{file_name_with_id}")
+                else
+                  warn "Skipped a missing attachment file: #{source_path}"
                 end
-                buf.puts MD.image(src: "attachments/#{file_name_with_id}")
               end
             else
               raise "Unknown part type: #{part.inspect}: #{page_title}"
