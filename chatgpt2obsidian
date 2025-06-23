@@ -29,6 +29,7 @@
 
 require "cgi"
 require "debug" if ENV["DEBUG"]
+require "digest"
 require "fileutils"
 require "json"
 require "optparse"
@@ -55,15 +56,23 @@ end
 def load_existing_mapping(output_dir)
   mapping = {}
   Dir.glob(File.join(output_dir, "*.md")) do |file|
-    text = File.read(file, 16384).force_encoding(Encoding::UTF_8).scrub("")
-    yaml_body = text[/\A---\n.*?(?:^---\n|\z)/m]
-    next unless yaml_body
+    content = File.read(file)
+    sha256sum = Digest::SHA256.hexdigest(content)
+    yaml_body = content[/\A---\n(?~^---$)\n/m]
+    frontmatter =
+      if yaml_body
+        begin
+          YAML.safe_load(yaml_body, permitted_classes: [Date, Time, Symbol])
+        rescue StandardError => e
+          warn "Failed to parse frontmatter in #{file}: #{e.message}"
+          {}
+        end
+      else
+        {}
+      end
+    cid = frontmatter["conversation_id"] or next
 
-    front = YAML.safe_load(yaml_body, permitted_classes: [Date, Time, Symbol])
-    cid = front["conversation_id"]
-    mapping[cid] = file if cid
-  rescue StandardError => e
-    warn "Failed to parse frontmatter in #{file}: #{e.message}"
+    mapping[cid] = { file:, frontmatter:, sha256sum: }
   end
   mapping
 end
@@ -227,13 +236,21 @@ class ChatGPT2Obsidian
       traverse.call(root_id.to_sym)
 
       Tempfile.create(["chatgpt_", ".md"]) do |md|
-        md.puts YAML.dump({
+        frontmatter = {
           "title"            => page_title,
           "created"          => created,
           "updated"          => updated,
           "conversation_id"  => conversation_id,
           "conversation_url" => conversation_url
-        })
+        }
+
+        case existing[conversation_id]
+        in nil
+        in { frontmatter: existing_frontmatter }
+          frontmatter.update(existing_frontmatter.except(*frontmatter.keys))
+        end
+
+        md.puts YAML.dump(frontmatter)
         md.puts "---"
 
         role = last_role = nil
@@ -436,6 +453,9 @@ class ChatGPT2Obsidian
           last_role = role
         end
 
+        md.flush
+        md.close
+
         basename =
           case slugify(page_title)
           in /./ => str
@@ -454,17 +474,15 @@ class ChatGPT2Obsidian
 
         target = File.join(@output_directory, "#{basename}.md")
 
-        if existing.key?(conversation_id)
-          old_path = existing[conversation_id]
-          File.rename(old_path, target)
+        case existing[conversation_id]
+        in nil
+        in { file: existing_file, sha256sum: existing_sha256sum }
+          File.rename(existing_file, target)
         end
-
-        md.flush
-        md.close
 
         # File.write(target.sub(/\.md\z/, ".json"), JSON.pretty_generate(conversation))
 
-        if !File.exist?(target) || !FileUtils.identical?(md.path, target)
+        if !existing_sha256sum || existing_sha256sum != Digest::SHA256.file(md.path).hexdigest
           FileUtils.cp(md.path, target)
           puts "Written #{target}"
         end
