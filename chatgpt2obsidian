@@ -38,6 +38,12 @@ require "time"
 require "uri"
 require "yaml"
 
+class Time
+  def encode_with(coder)
+    coder.represent_scalar(nil, iso8601)
+  end
+end
+
 def slugify(str)
   s = str.gsub(/[\x00-\x1F<>:"\/\\|?*.]/, "_")
   s.strip!
@@ -202,8 +208,8 @@ class ChatGPT2Obsidian
 
     data.each do |conversation|
       conversation => { title: page_title, conversation_id:, create_time:, update_time: }
-      created = Time.at(create_time).getlocal.iso8601
-      updated = Time.at(update_time).getlocal.iso8601
+      created = Time.at(create_time)
+      updated = Time.at(update_time)
       conversation_url = "https://chat.openai.com/c/#{conversation_id}"
 
       mapping = conversation[:mapping] || {}
