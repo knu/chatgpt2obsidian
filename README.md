@@ -40,6 +40,8 @@ cd chatgpt2obsidian
 ### Options
 
 - `-a, --attachments-subdirectory NAME`: Specify custom attachments subdirectory name (default: "attachments")
+- `-c, --created-key KEY`: Specify the frontmatter key for created timestamp (default: "created")
+- `-u, --updated-key KEY`: Specify the frontmatter key for updated timestamp (default: "updated")
 - `-h, --help`: Show help message
 
 ### Docker

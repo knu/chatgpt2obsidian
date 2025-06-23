@@ -170,10 +170,12 @@ class BufferedPrinter < StringIO
 end
 
 class ChatGPT2Obsidian
-  attr_reader :attachments_subdirectory, :input_file, :output_directory
+  attr_reader :attachments_subdirectory, :input_file, :output_directory, :created_key, :updated_key
 
   def initialize
     @attachments_subdirectory = "attachments"
+    @created_key = "created"
+    @updated_key = "updated"
     @input_file = nil
     @output_directory = nil
   end
@@ -184,6 +186,14 @@ class ChatGPT2Obsidian
 
       opts.on("-a", "--attachments-subdirectory NAME", "Specify attachments subdirectory name (default: attachments)") do |name|
         @attachments_subdirectory = name
+      end
+
+      opts.on("-c", "--created-key KEY", "Specify the frontmatter key for created timestamp (default: created)") do |key|
+        @created_key = key
+      end
+
+      opts.on("-u", "--updated-key KEY", "Specify the frontmatter key for updated timestamp (default: updated)") do |key|
+        @updated_key = key
       end
 
       opts.on("-h", "--help", "Show this message") do
@@ -238,8 +248,8 @@ class ChatGPT2Obsidian
       Tempfile.create(["chatgpt_", ".md"]) do |md|
         frontmatter = {
           "title"            => page_title,
-          "created"          => created,
-          "updated"          => updated,
+          @created_key       => created,
+          @updated_key       => updated,
           "conversation_id"  => conversation_id,
           "conversation_url" => conversation_url
         }
