@@ -53,7 +53,7 @@ def load_existing_mapping(output_dir)
     yaml_body = text[/\A---\n.*?(?:^---\n|\z)/m]
     next unless yaml_body
 
-    front = YAML.safe_load(yaml_body)
+    front = YAML.safe_load(yaml_body, permitted_classes: [Date, Time, Symbol])
     cid = front["conversation_id"]
     mapping[cid] = file if cid
   rescue StandardError => e
