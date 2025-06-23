@@ -450,9 +450,7 @@ class ChatGPT2Obsidian
 
         if existing.key?(conversation_id)
           old_path = existing[conversation_id]
-          unless File.exist?(target) && FileUtils.identical?(old_path, target)
-            FileUtils.mv(old_path, target)
-          end
+          File.rename(old_path, target)
         end
 
         md.flush
