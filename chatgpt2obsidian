@@ -27,6 +27,13 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 
+require "bundler/inline"
+
+gemfile do
+  source "https://rubygems.org"
+  gem "rubyzip"
+end
+
 require "cgi"
 require "debug" if ENV["DEBUG"]
 require "digest"
@@ -38,6 +45,7 @@ require "tempfile"
 require "time"
 require "uri"
 require "yaml"
+require "zip"
 
 class Time
   def encode_with(coder)
@@ -53,29 +61,6 @@ def slugify(str)
   s
 end
 
-def load_existing_mapping(output_dir)
-  mapping = {}
-  Dir.glob(File.join(output_dir, "*.md")) do |file|
-    content = File.read(file)
-    sha256sum = Digest::SHA256.hexdigest(content)
-    yaml_body = content[/\A---\n(?~^---$)\n/m]
-    frontmatter =
-      if yaml_body
-        begin
-          YAML.safe_load(yaml_body, permitted_classes: [Date, Time, Symbol])
-        rescue StandardError => e
-          warn "Failed to parse frontmatter in #{file}: #{e.message}"
-          {}
-        end
-      else
-        {}
-      end
-    cid = frontmatter["conversation_id"] or next
-
-    mapping[cid] = { file:, frontmatter:, sha256sum: }
-  end
-  mapping
-end
 
 module MD
   module_function
@@ -170,29 +155,65 @@ class BufferedPrinter < StringIO
 end
 
 class ChatGPT2Obsidian
-  attr_reader :attachments_subdirectory, :input_file, :output_directory, :created_key, :updated_key
+  attr_reader :attachments_subdirectory, :created_key, :updated_key
+
+  def self.run(argv = ARGV)
+    new.run(argv)
+  end
 
   def initialize
     @attachments_subdirectory = "attachments"
     @created_key = "created"
     @updated_key = "updated"
-    @input_file = nil
-    @output_directory = nil
+    @export_dir_is_temp = false
+    @export_dir = nil
   end
 
-  def parse_command_line(argv)
-    parser = OptionParser.new do |opts|
-      opts.banner = "Usage: #{$0} [options] <input_json> <output_directory>"
+  def load_existing_mapping
+    mapping = {}
+    Dir.glob(File.join(@output_directory, "*.md")) do |file|
+      content = File.read(file)
+      sha256sum = Digest::SHA256.hexdigest(content)
+      yaml_body = content[/\A---\n(?~^---$)\n/m]
+      frontmatter =
+        if yaml_body
+          begin
+            YAML.safe_load(yaml_body, permitted_classes: [Date, Time, Symbol])
+          rescue StandardError => e
+            warn "Failed to parse frontmatter in #{file}: #{e.message}"
+            {}
+          end
+        else
+          {}
+        end
+      cid = frontmatter["conversation_id"] or next
 
-      opts.on("-a", "--attachments-subdirectory NAME", "Specify attachments subdirectory name (default: attachments)") do |name|
+      mapping[cid] = { file:, frontmatter:, sha256sum: }
+    end
+    mapping
+  end
+
+  def parse_options(argv)
+    parser = OptionParser.new do |opts|
+      opts.banner = <<~BANNER
+        Usage: #{$0} [options] <input_path> <output_directory>
+
+            <input_path>: ChatGPT export zip file or its extracted directory
+            <output_directory>: Directory where converted markdown files will be saved
+      BANNER
+
+      opts.on("-a", "--attachments-subdirectory NAME",
+              "Specify attachments subdirectory name (default: attachments)") do |name|
         @attachments_subdirectory = name
       end
 
-      opts.on("-c", "--created-key KEY", "Specify the frontmatter key for created timestamp (default: created)") do |key|
+      opts.on("-c", "--created-key KEY",
+              "Specify the frontmatter key for created timestamp (default: created)") do |key|
         @created_key = key
       end
 
-      opts.on("-u", "--updated-key KEY", "Specify the frontmatter key for updated timestamp (default: updated)") do |key|
+      opts.on("-u", "--updated-key KEY",
+              "Specify the frontmatter key for updated timestamp (default: updated)") do |key|
         @updated_key = key
       end
 
@@ -203,26 +224,55 @@ class ChatGPT2Obsidian
     end
 
     begin
-      parser.parse!(argv)
+      remaining_argv = parser.parse(argv)
     rescue OptionParser::InvalidOption => e
       warn e.message
       warn parser.help
       exit 1
     end
 
-    if argv.size != 2
+    if remaining_argv.size != 2
       warn parser.help
       exit 1
     end
 
-    @input_file, @output_directory = argv
+    @input_path, @output_directory = remaining_argv
   end
 
-  def run
-    data = JSON.parse(File.read(@input_file), symbolize_names: true)
+  def locate_conversations_json(input_path)
+    if File.directory?(input_path)
+      @export_dir = input_path
+    elsif input_path.downcase.end_with?('.zip') && File.exist?(input_path)
+      @export_dir = Dir.mktmpdir(File.basename($0))
+      @export_dir_is_temp = true
+
+      Zip::File.open(input_path) do |zip_file|
+        zip_file.each do |entry|
+          path = File.join(@export_dir, entry.name)
+          FileUtils.mkdir_p(File.dirname(path))
+          entry.extract(path)
+        end
+      end
+    else
+      raise "Input path must be a ZIP file or directory containing conversations.json"
+    end
+
+    conversations_json = File.join(@export_dir, "conversations.json")
+
+    if File.file?(conversations_json)
+      conversations_json
+    else
+      raise "conversations.json is not found in #{input_path}"
+    end
+  end
+
+  def run(argv = ARGV)
+    parse_options(argv)
+    conversations_json = locate_conversations_json(@input_path)
+    data = JSON.parse(File.read(conversations_json), symbolize_names: true)
     FileUtils.mkdir_p(@output_directory)
 
-    existing = load_existing_mapping(@output_directory)
+    existing = load_existing_mapping
     used_basenames = {}
 
     data.each do |conversation|
@@ -373,7 +423,7 @@ class ChatGPT2Obsidian
                   file_id = uri.host
                   attachments.find { it[:id] == file_id } => { name: file_name }
                   file_name_with_id = "#{file_id}-#{file_name}"
-                  source_path = File.join(File.dirname(@input_file), file_name_with_id)
+                  source_path = File.join(@export_dir, file_name_with_id)
                   if File.exist?(source_path)
                     target_dir = File.join(@output_directory, @attachments_subdirectory)
                     target_path = File.join(target_dir, file_name_with_id)
@@ -498,13 +548,13 @@ class ChatGPT2Obsidian
         end
       end
     end
+  ensure
+    FileUtils.rm_rf(@export_dir) if @export_dir_is_temp
   end
 end
 
 def main
-  converter = ChatGPT2Obsidian.new
-  converter.parse_command_line(ARGV)
-  converter.run
+  ChatGPT2Obsidian.run
 end
 
 main if __FILE__ == $0

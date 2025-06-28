@@ -29,13 +29,13 @@ cd chatgpt2obsidian
 ### Direct execution
 
 ```sh
-./chatgpt2obsidian <conversations.json> <output_directory>
+./chatgpt2obsidian <input_path> <output_directory>
 ```
 
 ### Command-line Parameters
 
-- `<conversations.json>`: Path to the conversations.json file from your ChatGPT export
-- `<output_directory>`: Directory where markdown files will be created
+- `<input_path>`: ChatGPT export zip file or its extracted directory
+- `<output_directory>`: Directory where converted markdown files will be saved
 
 ### Options
 
@@ -47,29 +47,34 @@ cd chatgpt2obsidian
 ### Docker
 
 ```sh
-# Basic usage
-docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian /input/conversations.json /output
+# Basic usage with ZIP file
+docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian /input/chatgpt-export.zip /output
+
+# Basic usage with extracted directory
+docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian /input /output
 
 # With custom attachments subdirectory
-docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian --attachments-subdirectory images /input/conversations.json /output
+docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian --attachments-subdirectory images /input/chatgpt-export.zip /output
 ```
 
 ### Examples
 
 ```sh
-# Basic usage
-./chatgpt2obsidian conversations.json /path/to/vault/subdirectory
+# Basic usage with ZIP file
+./chatgpt2obsidian chatgpt-export.zip /path/to/vault/subdirectory
+
+# Basic usage with extracted directory
+./chatgpt2obsidian /path/to/extracted/chatgpt-export /path/to/vault/subdirectory
 
 # With custom attachments subdirectory
-./chatgpt2obsidian --attachments-subdirectory images conversations.json /path/to/vault/subdirectory
+./chatgpt2obsidian --attachments-subdirectory images chatgpt-export.zip /path/to/vault/subdirectory
 ```
 
 ## ChatGPT Export Process
 
 1. Go to ChatGPT Settings → Data Controls → Export Data
 2. Download your data when ready
-3. Extract the ZIP file to a (new) directory and locate the `conversations.json` file
-4. Use the path to `conversations.json` as the first argument
+3. Use the path to the downloaded ZIP file or extract it and use the path to the extracted directory as the first argument
 
 ```
 /path/to/chatgpt-export
@@ -85,7 +90,7 @@ docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory
 
 ## Output Structure
 
-The script generates one markdown file per conversation from the given `conversations.json` file, along with any attachments (images, files) referenced in the conversations.
+The script generates one markdown file per conversation from the ChatGPT export data, along with any attachments (images, files) referenced in the conversations.
 The output is structured to be compatible with Obsidian's note-taking system, allowing for easy organization and retrieval of conversations.
 Each markdown file is named after the conversation title, sanitized for filesystem compatibility, and includes all relevant metadata.
 
