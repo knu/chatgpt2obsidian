@@ -1,6 +1,6 @@
 # ChatGPT to Obsidian Converter
 
-This is a Ruby script that converts ChatGPT export data into Obsidian-compatible markdown files with proper frontmatter metadata and formatting.
+This tool converts ChatGPT export data into Obsidian-compatible markdown files with proper frontmatter metadata and formatting.
 
 ## Features
 
@@ -10,26 +10,21 @@ This is a Ruby script that converts ChatGPT export data into Obsidian-compatible
 - **Duplicate prevention**: Handles filename conflicts and tracks existing files
 - **Rich content support**: Processes web search results, thoughts, code blocks, app-pairing contexts, and multimedia content
 
-## Requirements
-
-- Ruby 3.4 or later (optional if using Docker)
-- Alternatively, Docker for containerized execution
-
-## Installation
-
-Clone or download this repository:
-
-```sh
-git clone https://github.com/knu/chatgpt2obsidian.git
-cd chatgpt2obsidian
-```
-
 ## Usage
 
-### Direct execution
+### Docker (Recommended)
+
+The easiest way to use this tool is with Docker - no installation required!
 
 ```sh
-./chatgpt2obsidian <input_path> <output_directory>
+# Basic usage with ZIP file
+docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian /input/chatgpt-export.zip /output
+
+# Basic usage with extracted directory
+docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian /input /output
+
+# With custom attachments subdirectory
+docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian --attachments-subdirectory images /input/chatgpt-export.zip /output
 ```
 
 ### Command-line Parameters
@@ -44,21 +39,20 @@ cd chatgpt2obsidian
 - `-u, --updated-key KEY`: Specify the frontmatter key for updated timestamp (default: "updated")
 - `-h, --help`: Show help message
 
-### Docker
+### Alternative: Local Ruby Installation
 
+If you prefer to run the script directly:
+
+#### Requirements
+- Ruby 3.4 or later
+
+#### Installation
 ```sh
-# Basic usage with ZIP file
-docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian /input/chatgpt-export.zip /output
-
-# Basic usage with extracted directory
-docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian /input /output
-
-# With custom attachments subdirectory
-docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian --attachments-subdirectory images /input/chatgpt-export.zip /output
+git clone https://github.com/knu/chatgpt2obsidian.git
+cd chatgpt2obsidian
 ```
 
-### Examples
-
+#### Usage
 ```sh
 # Basic usage with ZIP file
 ./chatgpt2obsidian chatgpt-export.zip /path/to/vault/subdirectory
@@ -148,17 +142,17 @@ The script handles various ChatGPT content types:
 
 ## File Naming
 
-- Conversation titles are sanitized for filesystem compatibility
-- Special characters are replaced with underscores
-- Duplicate titles get numbered suffixes (`_1`, `_2`, etc.)
-- Existing files are preserved and updated in place
+- Conversation titles are sanitized for filesystem compatibility.
+- Special characters are replaced with underscores.
+- Duplicate titles get numbered suffixes (`_1`, `_2`, etc.).
+- Existing files are preserved and updated in place.
+- The original title is stored in frontmatter with the `title` key.
+  Obsidian community plugins like [Front Matter Title](https://github.com/snezhig/obsidian-front-matter-title) can make use of it.
 
 ## Limitations
 
-- Only processes conversations from ChatGPT exports
-- Requires Ruby runtime environment (or Docker)
-- Some advanced ChatGPT features may not be fully represented
-- Large conversation histories may take time to process
+- Not all content types in export files may be supported.
+- Large conversation histories may take time to process.
 
 ## License
 
