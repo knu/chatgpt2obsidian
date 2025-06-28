@@ -537,7 +537,10 @@ class ChatGPT2Obsidian
         case existing[conversation_id]
         in nil
         in { file: existing_file, sha256sum: existing_sha256sum }
-          File.rename(existing_file, target)
+          if existing_file != target
+            puts "Renaming #{existing_file} to #{target}"
+            File.rename(existing_file, target)
+          end
         end
 
         # File.write(target.sub(/\.md\z/, ".json"), JSON.pretty_generate(conversation))
