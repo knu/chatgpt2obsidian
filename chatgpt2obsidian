@@ -519,7 +519,7 @@ class ChatGPT2Obsidian
         basename =
           case slugify(page_title)
           in /./ => str
-            str
+            str.unicode_normalize(:nfc)
           else
             conversation_id
           end
@@ -538,7 +538,12 @@ class ChatGPT2Obsidian
         in nil
         in { file: existing_file, sha256sum: existing_sha256sum }
           if existing_file != target
-            puts "Renaming #{existing_file} to #{target}"
+            if existing_file.unicode_normalize(:nfc) != target
+              # Only notify when they differ in their normalized form,
+              # because renaming may otherwise be a no-op on a
+              # filesystem that performs automatic normalization.
+              puts "Renaming #{existing_file} to #{target}"
+            end
             File.rename(existing_file, target)
           end
         end
