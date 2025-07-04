@@ -315,8 +315,6 @@ class ChatGPT2Obsidian
 
         role = last_role = nil
 
-        @page_title = page_title
-
         order.each do |msg_id|
           entry = mapping[msg_id]
           entry => { message: { author:, content: } }
@@ -341,9 +339,13 @@ class ChatGPT2Obsidian
             # These roles don't need headers
           end
 
-          if process_message_entry(buf, entry)
-            buf.flush
-            last_role = role
+          begin
+            if process_message_entry(buf, entry)
+              buf.flush
+              last_role = role
+            end
+          rescue => e
+            raise "#{e.message}: #{page_title}"
           end
         end
 
@@ -396,13 +398,125 @@ class ChatGPT2Obsidian
 
   private
 
+  def process_attachment_file(buf, attachments, file_id)
+    attachments.find { it[:id] == file_id } => { name: file_name }
+    file_name_with_id = "#{file_id}-#{file_name}"
+    source_path = File.join(@export_dir, file_name_with_id)
+    if File.exist?(source_path)
+      target_dir = File.join(@output_directory, @attachments_subdirectory)
+      target_path = File.join(target_dir, file_name_with_id)
+      unless File.exist?(target_path) && FileUtils.identical?(source_path, target_path)
+        FileUtils.mkdir_p(target_dir)
+        FileUtils.cp(source_path, target_path, verbose: true)
+      end
+      buf.puts MD.image(src: File.join(@attachments_subdirectory, file_name_with_id))
+    else
+      warn "Skipped a missing attachment file: #{source_path}"
+    end
+  end
+
   def process_message_entry(buf, entry)
     entry => { message: { author:, content:, metadata:, recipient: } }
     author => { role: }
     content => { content_type: }
 
+    case [role, content_type]
+    in [_, "user_editable_context" | "app_pairing_content"]
+      process_context_message(buf, entry)
+    in ["user", _]
+      process_user_message(buf, entry)
+    else
+      process_agent_message(buf, entry)
+    end
+  end
+
+  def process_user_message(buf, entry)
+    entry => { message: { content:, recipient: } }
+    content => { content_type: }
+
+    case content_type
+    in "text"
+      case recipient
+      in "all" | "bio"
+        buf.puts content.fetch(:parts).reject(&:empty?)
+      else
+        return false
+      end
+    in "multimodal_text"
+      entry => { message: { metadata: } }
+      metadata => { attachments: }
+
+      content.fetch(:parts).each do |part|
+        case part
+        in String
+          buf.puts part
+        in { content_type: "image_asset_pointer", asset_pointer: }
+          uri = URI(asset_pointer)
+          case uri.scheme
+          in "file-service"
+            file_id = uri.host
+            process_attachment_file(buf, attachments, file_id)
+          end
+        else
+          raise "Unknown part type: #{part.inspect}"
+        end
+      end
+    else
+      pp entry
+      raise "Unknown content type `#{content_type}` for user message"
+    end
+
+    true
+  end
+
+  def process_context_message(buf, entry)
+    entry => { message: { content:, metadata: } }
+    content => { content_type: }
+
+    case content_type
+    in "user_editable_context"
+      return false
+    in "app_pairing_content"
+      metadata => { app_pairing: { shared_workspaces: } }
+
+      shared_workspaces.each do |workspace|
+        workspace => { id: workspace_id, app_name:, title: }
+        content => { context_parts:, custom_instructions: }
+
+        if context_parts
+          context_part = context_parts.find { |part| part[:workspace_id] == workspace_id }
+          context_part => { text: }
+        else
+          custom_instructions => /./ => text
+        end
+
+        buf.indent("> ") do
+          buf.puts "[!quote]- Looked at #{app_name}"
+          buf.puts "#### #{title}"
+          buf.puts "```"
+          buf.puts text
+          buf.puts "```"
+        end
+
+        buf.puts
+      end
+    else
+      pp entry
+      raise "Unknown content type `#{content_type}` for context message"
+    end
+
+    true
+  end
+
+  def process_agent_message(buf, entry)
+    entry => { message: { author:, content:, metadata:, recipient: } }
+    author => { role: }
+    content => { content_type: }
+
+    web_search = false
+
     case role
-    in "user" | "assistant"
+    in "assistant"
       # Header handling is done in the caller
     in "tool"
       case metadata
@@ -452,12 +566,11 @@ class ChatGPT2Obsidian
       end
     in "system"
       return false if metadata in { is_visually_hidden_from_conversation: true }
-
       pp entry
-      raise "Unexpected system message with unhidden content: #{@page_title}"
+      raise "Unexpected system message with unhidden content"
     else
       pp entry
-      raise "Unknown role `#{role}`: #{@page_title}"
+      raise "Unknown role `#{role}` for agent message"
     end
 
     case content_type
@@ -487,48 +600,11 @@ class ChatGPT2Obsidian
           case uri.scheme
           in "file-service"
             file_id = uri.host
-            attachments.find { it[:id] == file_id } => { name: file_name }
-            file_name_with_id = "#{file_id}-#{file_name}"
-            source_path = File.join(@export_dir, file_name_with_id)
-            if File.exist?(source_path)
-              target_dir = File.join(@output_directory, @attachments_subdirectory)
-              target_path = File.join(target_dir, file_name_with_id)
-              unless File.exist?(target_path) && FileUtils.identical?(source_path, target_path)
-                FileUtils.mkdir_p(target_dir)
-                FileUtils.cp(source_path, target_path, verbose: true)
-              end
-              buf.puts MD.image(src: File.join(@attachments_subdirectory, file_name_with_id))
-            else
-              warn "Skipped a missing attachment file: #{source_path}"
-            end
+            process_attachment_file(buf, attachments, file_id)
           end
         else
-          raise "Unknown part type: #{part.inspect}: #{@page_title}"
+          raise "Unknown part type: #{part.inspect}"
         end
-      end
-    in "app_pairing_content"
-      metadata => { app_pairing: { shared_workspaces: } }
-
-      shared_workspaces.each do |workspace|
-        workspace => { id: workspace_id, app_name:, title: }
-        content => { context_parts:, custom_instructions: }
-
-        if context_parts
-          context_part = context_parts.find { |part| part[:workspace_id] == workspace_id }
-          context_part => { text: }
-        else
-          custom_instructions => /./ => text
-        end
-
-        buf.indent("> ") do
-          buf.puts "[!quote]- Looked at #{app_name}"
-          buf.puts "#### #{title}"
-          buf.puts "```"
-          buf.puts text
-          buf.puts "```"
-        end
-
-        buf.puts
       end
     in "sonic_webpage"
       content => { url:, title:, domain:, text: }
@@ -568,11 +644,9 @@ class ChatGPT2Obsidian
       buf.indent("> ") do
         buf.puts "[!info]- #{content.fetch(:content)}"
       end
-    in "app_pairing_content"
-      return false
     else
       pp entry
-      raise "Unknown content type `#{content_type}`: #{@page_title}"
+      raise "Unknown content type `#{content_type}` for agent message"
     end
 
     true
