@@ -461,7 +461,7 @@ class ChatGPT2Obsidian
       in "all" | "bio"
         buf.puts content.fetch(:parts).reject(&:empty?)
       else
-        return false
+        return nil
       end
     in "multimodal_text"
       entry => { message: { metadata: } }
@@ -487,7 +487,7 @@ class ChatGPT2Obsidian
       raise "Unknown content type `#{content_type}` for user message"
     end
 
-    true
+    :user
   end
 
   def process_context_message(buf, entry)
@@ -496,7 +496,7 @@ class ChatGPT2Obsidian
 
     case content_type
     in "user_editable_context"
-      return false
+      return nil
     in "app_pairing_content"
       metadata => { app_pairing: { shared_workspaces: } }
 
@@ -526,7 +526,7 @@ class ChatGPT2Obsidian
       raise "Unknown content type `#{content_type}` for context message"
     end
 
-    true
+    :context
   end
 
   def process_agent_message(buf, entry)
@@ -535,6 +535,7 @@ class ChatGPT2Obsidian
     content => { content_type: }
 
     web_search = false
+    output_type = :response
 
     case role
     in "assistant"
@@ -542,6 +543,7 @@ class ChatGPT2Obsidian
     in "tool"
       case metadata
       in { search_result_groups: }
+        output_type = :process
         buf.indent("> ") do
           buf.puts "[!abstract]- Search Results"
           search_result_groups.each do |group|
@@ -562,31 +564,33 @@ class ChatGPT2Obsidian
 
         buf.puts
       in { async_task_type: "research", async_task_title:, async_task_prompt: }
+        output_type = :process
         buf.indent("> ")
         buf.puts "[!abstract]- #{async_task_title}"
         buf.puts async_task_prompt
       in { finished_text: } if (headline = metadata[:summarization_headline] || metadata[:initial_text])
         case content
         in { content_type: "text", parts: } if parts.any?(/./)
+          output_type = :process
           buf.indent("> ")
           buf.puts "[!abstract]- #{headline}"
           buf.puts finished_text
         else
-          return false
+          return nil
         end
       in _ if author in { name: "web.search" }
         web_search = true
       in _ if metadata in { is_visually_hidden_from_conversation: true }
-        return false
+        return nil
       in _ if author in { name: "bio" | "canmore.create_textdoc" | "canmore.update_textdoc" }
-        return false
+        return nil
       in _ if content in { content_type: "execution_output" }
-        return false
+        return nil
       else
         # ok
       end
     in "system"
-      return false if metadata in { is_visually_hidden_from_conversation: true }
+      return nil if metadata in { is_visually_hidden_from_conversation: true }
 
       pp entry
       raise "Unexpected system message with unhidden content"
@@ -598,6 +602,7 @@ class ChatGPT2Obsidian
     case content_type
     in "text"
       if web_search
+        output_type = :process
         buf.indent("> ") do
           buf.puts "[!info]- Web Search"
           buf.puts content.fetch(:parts).reject(&:empty?)
@@ -607,7 +612,7 @@ class ChatGPT2Obsidian
         in "all" | "bio"
           buf.puts content.fetch(:parts).reject(&:empty?)
         else
-          return false
+          return nil
         end
       end
     in "multimodal_text"
@@ -629,6 +634,7 @@ class ChatGPT2Obsidian
         end
       end
     in "sonic_webpage"
+      output_type = :process
       content => { url:, title:, domain:, text: }
       buf.indent("> ") do
         buf.puts "[!info]- Web Search: #{domain}"
@@ -638,6 +644,7 @@ class ChatGPT2Obsidian
 
       buf.puts
     in "thoughts"
+      output_type = :process
       content => { thoughts: }
       buf.indent("> ") do
         buf.puts "[!abstract]- Thoughts"
@@ -650,6 +657,7 @@ class ChatGPT2Obsidian
     in "code"
       case metadata
       in { search_queries: }
+        output_type = :process
         buf.indent("> ") do
           queries = search_queries.map { |search_query|
             search_query => { type: "search", q: }
@@ -660,9 +668,10 @@ class ChatGPT2Obsidian
           buf.puts
         end
       else
-        return false
+        return nil
       end
     in "reasoning_recap"
+      output_type = :process
       buf.indent("> ") do
         buf.puts "[!info]- #{content.fetch(:content)}"
       end
@@ -671,7 +680,7 @@ class ChatGPT2Obsidian
       raise "Unknown content type `#{content_type}` for agent message"
     end
 
-    true
+    output_type
   end
 end
 
