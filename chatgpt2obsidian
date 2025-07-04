@@ -272,8 +272,6 @@ class ChatGPT2Obsidian
     data = JSON.parse(File.read(conversations_json), symbolize_names: true)
     FileUtils.mkdir_p(@output_directory)
 
-    used_basenames = {}
-
     data.each do |conversation|
       conversation => { title: page_title, conversation_id:, create_time:, update_time: }
       created = Time.at(create_time)
@@ -351,23 +349,7 @@ class ChatGPT2Obsidian
         md.flush
         md.close
 
-        basename =
-          case slugify(page_title)
-          in /./ => str
-            str.unicode_normalize(:nfc)
-          else
-            conversation_id
-          end
-
-        original_basename = basename
-        counter = 1
-        while used_basenames.key?(basename) && used_basenames[basename] != conversation_id
-          basename = "#{original_basename}_#{counter}"
-          counter += 1
-        end
-        used_basenames[basename] = conversation_id
-
-        target = File.join(@output_directory, "#{basename}.md")
+        target = determine_target_file(page_title, conversation_id)
 
         case existing_file_info[conversation_id]
         in nil
@@ -398,6 +380,31 @@ class ChatGPT2Obsidian
   private
 
   def existing_file_info = @existing_file_info ||= load_existing_file_info
+
+  def determine_target_file(page_title, conversation_id)
+    basename =
+      case slugify(page_title)
+      in /./ => str
+        str.unicode_normalize(:nfc)
+      else
+        conversation_id
+      end
+
+    case existing_file_info[conversation_id]
+    in { file: }
+      file
+    else
+      original_basename = basename
+      counter = 1
+      target = File.join(@output_directory, "#{basename}.md")
+      while File.exist?(target)
+        basename = "#{original_basename}_#{counter}"
+        target = File.join(@output_directory, "#{basename}.md")
+        counter += 1
+      end
+      target
+    end
+  end
 
   def process_attachment_file(buf, attachments, file_id)
     attachments.find { it[:id] == file_id } => { name: file_name }
