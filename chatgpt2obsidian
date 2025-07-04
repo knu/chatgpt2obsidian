@@ -155,7 +155,7 @@ class BufferedPrinter < StringIO
 end
 
 class ChatGPT2Obsidian
-  attr_reader :attachments_subdirectory, :created_key, :updated_key
+  attr_reader :attachments_subdirectory, :created_key, :updated_key, :json_output_directory
 
   def self.run(argv = ARGV)
     new.run(argv)
@@ -165,6 +165,7 @@ class ChatGPT2Obsidian
     @attachments_subdirectory = "attachments"
     @created_key = "created"
     @updated_key = "updated"
+    @json_output_directory = nil
     @export_dir_is_temp = false
     @export_dir = nil
   end
@@ -215,6 +216,11 @@ class ChatGPT2Obsidian
       opts.on("-u", "--updated-key KEY",
               "Specify the frontmatter key for updated timestamp (default: updated)") do |key|
         @updated_key = key
+      end
+
+      opts.on("-j", "--json-output DIR",
+              "Output raw JSON files to the specified directory") do |dir|
+        @json_output_directory = dir
       end
 
       opts.on("-h", "--help", "Show this message") do
@@ -271,6 +277,7 @@ class ChatGPT2Obsidian
     conversations_json = locate_conversations_json(@input_path)
     data = JSON.parse(File.read(conversations_json), symbolize_names: true)
     FileUtils.mkdir_p(@output_directory)
+    FileUtils.mkdir_p(@json_output_directory) if @json_output_directory
 
     data.each do |conversation|
       process_conversation(conversation)
@@ -376,7 +383,10 @@ class ChatGPT2Obsidian
         end
       end
 
-      # File.write(target.sub(/\.md\z/, ".json"), JSON.pretty_generate(conversation))
+      if @json_output_directory
+        json_file = File.join(@json_output_directory, "#{File.basename(target, ".md")}.json")
+        File.write(json_file, JSON.pretty_generate(conversation))
+      end
 
       if !existing_sha256sum || existing_sha256sum != Digest::SHA256.file(md.path).hexdigest
         FileUtils.cp(md.path, target)
