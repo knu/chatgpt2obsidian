@@ -61,7 +61,6 @@ def slugify(str)
   s
 end
 
-
 module MD
   module_function
 
@@ -100,14 +99,14 @@ module MD
   end
 
   def image(src:, alt: nil, title: nil)
-    "!#{linked_text(text: alt || "", href: src, title: title)}"
+    "!#{linked_text(text: alt || "", href: src, title:)}"
   end
 
   def linked_image(src:, href:, alt: nil, title: nil, link_title: nil)
     if link_title
-      "[#{image(alt: alt, src: src, title: title)}](#{escape_href(href)} #{escape_title(link_title)})"
+      "[#{image(alt:, src:, title:)}](#{escape_href(href)} #{escape_title(link_title)})"
     else
-      "[#{image(alt: alt, src: src, title: title)}](#{escape_href(href)})"
+      "[#{image(alt:, src:, title:)}](#{escape_href(href)})"
     end
   end
 end
@@ -248,7 +247,7 @@ class ChatGPT2Obsidian
   def locate_conversations_json(input_path)
     if File.directory?(input_path)
       @export_dir = input_path
-    elsif input_path.downcase.end_with?('.zip') && File.exist?(input_path)
+    elsif input_path.downcase.end_with?(".zip") && File.exist?(input_path)
       @export_dir = Dir.mktmpdir(File.basename($0))
       @export_dir_is_temp = true
 
@@ -291,7 +290,7 @@ class ChatGPT2Obsidian
   def existing_file_info = @existing_file_info ||= load_existing_file_info
 
   def process_conversation(conversation)
-    conversation => { title: page_title, conversation_id:, create_time:, update_time: }
+    conversation => { title:, conversation_id:, create_time:, update_time: }
     created = Time.at(create_time)
     updated = Time.at(update_time)
     conversation_url = "https://chat.openai.com/c/#{conversation_id}"
@@ -312,11 +311,11 @@ class ChatGPT2Obsidian
 
     Tempfile.create(["chatgpt_", ".md"]) do |md|
       frontmatter = {
-        "title"            => page_title,
+        "title"            => title,
         @created_key       => created,
         @updated_key       => updated,
         "conversation_id"  => conversation_id,
-        "conversation_url" => conversation_url
+        "conversation_url" => conversation_url,
       }
 
       case existing_file_info[conversation_id]
@@ -360,14 +359,14 @@ class ChatGPT2Obsidian
             last_role = role
           end
         rescue => e
-          raise "#{e.message}: #{page_title}"
+          raise "#{e.message}: #{title}"
         end
       end
 
       md.flush
       md.close
 
-      target = determine_target_file(page_title, conversation_id)
+      target = determine_target_file(title, conversation_id)
 
       case existing_file_info[conversation_id]
       in nil
@@ -395,9 +394,9 @@ class ChatGPT2Obsidian
     end
   end
 
-  def determine_target_file(page_title, conversation_id)
+  def determine_target_file(title, conversation_id)
     basename =
-      case slugify(page_title)
+      case slugify(title)
       in /./ => str
         str.unicode_normalize(:nfc)
       else
@@ -588,6 +587,7 @@ class ChatGPT2Obsidian
       end
     in "system"
       return false if metadata in { is_visually_hidden_from_conversation: true }
+
       pp entry
       raise "Unexpected system message with unhidden content"
     else
