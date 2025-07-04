@@ -169,7 +169,7 @@ class ChatGPT2Obsidian
     @export_dir = nil
   end
 
-  def load_existing_mapping
+  def load_existing_file_info
     mapping = {}
     Dir.glob(File.join(@output_directory, "*.md")) do |file|
       content = File.read(file)
@@ -272,7 +272,6 @@ class ChatGPT2Obsidian
     data = JSON.parse(File.read(conversations_json), symbolize_names: true)
     FileUtils.mkdir_p(@output_directory)
 
-    existing = load_existing_mapping
     used_basenames = {}
 
     data.each do |conversation|
@@ -304,7 +303,7 @@ class ChatGPT2Obsidian
           "conversation_url" => conversation_url
         }
 
-        case existing[conversation_id]
+        case existing_file_info[conversation_id]
         in nil
         in { frontmatter: existing_frontmatter }
           frontmatter.update(existing_frontmatter.except(*frontmatter.keys))
@@ -370,7 +369,7 @@ class ChatGPT2Obsidian
 
         target = File.join(@output_directory, "#{basename}.md")
 
-        case existing[conversation_id]
+        case existing_file_info[conversation_id]
         in nil
         in { file: existing_file, sha256sum: existing_sha256sum }
           if existing_file != target
@@ -397,6 +396,8 @@ class ChatGPT2Obsidian
   end
 
   private
+
+  def existing_file_info = @existing_file_info ||= load_existing_file_info
 
   def process_attachment_file(buf, attachments, file_id)
     attachments.find { it[:id] == file_id } => { name: file_name }
