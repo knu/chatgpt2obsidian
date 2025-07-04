@@ -315,16 +315,15 @@ class ChatGPT2Obsidian
 
         role = last_role = nil
 
+        @page_title = page_title
+
         order.each do |msg_id|
           entry = mapping[msg_id]
-          entry => { message: { author:, content:, metadata:, recipient: } }
+          entry => { message: { author:, content: } }
           author => { role: }
           content => { content_type: }
 
-          case content_type
-          when "user_editable_context"
-            next
-          end
+          next if content_type == "user_editable_context"
 
           buf = BufferedPrinter.new(md)
           buf.puts if last_role
@@ -338,179 +337,14 @@ class ChatGPT2Obsidian
             if last_role in "user" | nil
               buf.puts "# ChatGPT"
             end
-          in "tool"
-            case metadata
-            in { search_result_groups: }
-              buf.indent("> ") do
-                buf.puts "[!abstract]- Search Results"
-                search_result_groups.each do |group|
-                  group => { type: "search_result_group", domain:, entries: }
-
-                  buf.indent("> ") do
-                    buf.puts "[!info] #{domain}"
-
-                    entries.each do |entry|
-                      entry => { type: "search_result", title:, url: }
-                      buf.puts "- " + MD.linked_text(text: title, href: url)
-                    end
-                  end
-
-                  buf.puts
-                end
-              end
-
-              buf.puts
-            in { async_task_type: "research", async_task_title:, async_task_prompt: }
-              buf.indent("> ")
-              buf.puts "[!abstract]- #{async_task_title}"
-              buf.puts async_task_prompt
-            in { finished_text: } if (headline = metadata[:summarization_headline] || metadata[:initial_text])
-              case content
-              in { content_type: "text", parts: } if parts.any?(/./)
-                buf.indent("> ")
-                buf.puts "[!abstract]- #{headline}"
-                buf.puts finished_text
-              else
-                next
-              end
-            in _ if author in { name: "web.search" }
-              web_search = true
-            in _ if metadata in { is_visually_hidden_from_conversation: true }
-              next
-            in _ if author in { name: "bio" | "canmore.create_textdoc" | "canmore.update_textdoc" }
-              next
-            in _ if content in { content_type: "execution_output" }
-              next
-            else
-              # ok
-            end
-          in "system"
-            next if metadata in { is_visually_hidden_from_conversation: true }
-
-            pp entry
-            raise "Unexpected system message with unhidden content: #{page_title}"
-          else
-            pp entry
-            raise "Unknown role `#{role}`: #{page_title}"
+          in "tool" | "system"
+            # These roles don't need headers
           end
 
-          case content_type
-          in "text"
-            if web_search
-              buf.indent("> ") do
-                buf.puts "[!info]- Web Search"
-                buf.puts content.fetch(:parts).reject(&:empty?)
-              end
-            else
-              case recipient
-              in "all" | "bio"
-                buf.puts content.fetch(:parts).reject(&:empty?)
-              else
-                next
-              end
-            end
-          in "multimodal_text"
-            metadata => { attachments: }
-
-            content.fetch(:parts).each do |part|
-              case part
-              in String
-                buf.puts part
-              in { content_type: "image_asset_pointer", asset_pointer: }
-                uri = URI(asset_pointer)
-                case uri.scheme
-                in "file-service"
-                  file_id = uri.host
-                  attachments.find { it[:id] == file_id } => { name: file_name }
-                  file_name_with_id = "#{file_id}-#{file_name}"
-                  source_path = File.join(@export_dir, file_name_with_id)
-                  if File.exist?(source_path)
-                    target_dir = File.join(@output_directory, @attachments_subdirectory)
-                    target_path = File.join(target_dir, file_name_with_id)
-                    unless File.exist?(target_path) && FileUtils.identical?(source_path, target_path)
-                      FileUtils.mkdir_p(target_dir)
-                      FileUtils.cp(source_path, target_path, verbose: true)
-                    end
-                    buf.puts MD.image(src: File.join(@attachments_subdirectory, file_name_with_id))
-                  else
-                    warn "Skipped a missing attachment file: #{source_path}"
-                  end
-                end
-              else
-                raise "Unknown part type: #{part.inspect}: #{page_title}"
-              end
-            end
-          in "app_pairing_content"
-            metadata => { app_pairing: { shared_workspaces: } }
-
-            shared_workspaces.each do |workspace|
-              workspace => { id: workspace_id, app_name:, title: }
-              content => { context_parts:, custom_instructions: }
-
-              if context_parts
-                context_part = context_parts.find { |part| part[:workspace_id] == workspace_id }
-                context_part => { text: }
-              else
-                custom_instructions => /./ => text
-              end
-
-              buf.indent("> ") do
-                buf.puts "[!quote]- Looked at #{app_name}"
-                buf.puts "#### #{title}"
-                buf.puts "```"
-                buf.puts text
-                buf.puts "```"
-              end
-
-              buf.puts
-            end
-          in "sonic_webpage"
-            content => { url:, title:, domain:, text: }
-            buf.indent("> ") do
-              buf.puts "[!info]- Web Search: #{domain}"
-              buf.puts "#### #{MD.linked_text(text: title, href: url)}"
-              buf.puts text
-            end
-
-            buf.puts
-          in "thoughts"
-            content => { thoughts: }
-            buf.indent("> ") do
-              buf.puts "[!abstract]- Thoughts"
-              thoughts.each do |thought|
-                buf.puts "- #{thought.fetch(:content)}"
-              end
-            end
-
-            buf.puts
-          in "code"
-            case metadata
-            in { search_queries: }
-              buf.indent("> ") do
-                queries = search_queries.map { |search_query|
-                  search_query => { type: "search", q: }
-                  "[#{q}]"
-                }.join(" ")
-
-                buf.puts "[!info]- Web Search: #{queries}"
-                buf.puts
-              end
-            else
-              next
-            end
-          in "reasoning_recap"
-            buf.indent("> ") do
-              buf.puts "[!info]- #{content.fetch(:content)}"
-            end
-          in "app_pairing_content"
-            next
-          else
-            pp entry
-            raise "Unknown content type `#{content_type}`: #{page_title}"
+          if process_message_entry(buf, entry)
+            buf.flush
+            last_role = role
           end
-
-          buf.flush
-          last_role = role
         end
 
         md.flush
@@ -558,6 +392,190 @@ class ChatGPT2Obsidian
     end
   ensure
     FileUtils.rm_rf(@export_dir) if @export_dir_is_temp
+  end
+
+  private
+
+  def process_message_entry(buf, entry)
+    entry => { message: { author:, content:, metadata:, recipient: } }
+    author => { role: }
+    content => { content_type: }
+
+    case role
+    in "user" | "assistant"
+      # Header handling is done in the caller
+    in "tool"
+      case metadata
+      in { search_result_groups: }
+        buf.indent("> ") do
+          buf.puts "[!abstract]- Search Results"
+          search_result_groups.each do |group|
+            group => { type: "search_result_group", domain:, entries: }
+
+            buf.indent("> ") do
+              buf.puts "[!info] #{domain}"
+
+              entries.each do |entry|
+                entry => { type: "search_result", title:, url: }
+                buf.puts "- " + MD.linked_text(text: title, href: url)
+              end
+            end
+
+            buf.puts
+          end
+        end
+
+        buf.puts
+      in { async_task_type: "research", async_task_title:, async_task_prompt: }
+        buf.indent("> ")
+        buf.puts "[!abstract]- #{async_task_title}"
+        buf.puts async_task_prompt
+      in { finished_text: } if (headline = metadata[:summarization_headline] || metadata[:initial_text])
+        case content
+        in { content_type: "text", parts: } if parts.any?(/./)
+          buf.indent("> ")
+          buf.puts "[!abstract]- #{headline}"
+          buf.puts finished_text
+        else
+          return false
+        end
+      in _ if author in { name: "web.search" }
+        web_search = true
+      in _ if metadata in { is_visually_hidden_from_conversation: true }
+        return false
+      in _ if author in { name: "bio" | "canmore.create_textdoc" | "canmore.update_textdoc" }
+        return false
+      in _ if content in { content_type: "execution_output" }
+        return false
+      else
+        # ok
+      end
+    in "system"
+      return false if metadata in { is_visually_hidden_from_conversation: true }
+
+      pp entry
+      raise "Unexpected system message with unhidden content: #{@page_title}"
+    else
+      pp entry
+      raise "Unknown role `#{role}`: #{@page_title}"
+    end
+
+    case content_type
+    in "text"
+      if web_search
+        buf.indent("> ") do
+          buf.puts "[!info]- Web Search"
+          buf.puts content.fetch(:parts).reject(&:empty?)
+        end
+      else
+        case recipient
+        in "all" | "bio"
+          buf.puts content.fetch(:parts).reject(&:empty?)
+        else
+          return false
+        end
+      end
+    in "multimodal_text"
+      metadata => { attachments: }
+
+      content.fetch(:parts).each do |part|
+        case part
+        in String
+          buf.puts part
+        in { content_type: "image_asset_pointer", asset_pointer: }
+          uri = URI(asset_pointer)
+          case uri.scheme
+          in "file-service"
+            file_id = uri.host
+            attachments.find { it[:id] == file_id } => { name: file_name }
+            file_name_with_id = "#{file_id}-#{file_name}"
+            source_path = File.join(@export_dir, file_name_with_id)
+            if File.exist?(source_path)
+              target_dir = File.join(@output_directory, @attachments_subdirectory)
+              target_path = File.join(target_dir, file_name_with_id)
+              unless File.exist?(target_path) && FileUtils.identical?(source_path, target_path)
+                FileUtils.mkdir_p(target_dir)
+                FileUtils.cp(source_path, target_path, verbose: true)
+              end
+              buf.puts MD.image(src: File.join(@attachments_subdirectory, file_name_with_id))
+            else
+              warn "Skipped a missing attachment file: #{source_path}"
+            end
+          end
+        else
+          raise "Unknown part type: #{part.inspect}: #{@page_title}"
+        end
+      end
+    in "app_pairing_content"
+      metadata => { app_pairing: { shared_workspaces: } }
+
+      shared_workspaces.each do |workspace|
+        workspace => { id: workspace_id, app_name:, title: }
+        content => { context_parts:, custom_instructions: }
+
+        if context_parts
+          context_part = context_parts.find { |part| part[:workspace_id] == workspace_id }
+          context_part => { text: }
+        else
+          custom_instructions => /./ => text
+        end
+
+        buf.indent("> ") do
+          buf.puts "[!quote]- Looked at #{app_name}"
+          buf.puts "#### #{title}"
+          buf.puts "```"
+          buf.puts text
+          buf.puts "```"
+        end
+
+        buf.puts
+      end
+    in "sonic_webpage"
+      content => { url:, title:, domain:, text: }
+      buf.indent("> ") do
+        buf.puts "[!info]- Web Search: #{domain}"
+        buf.puts "#### #{MD.linked_text(text: title, href: url)}"
+        buf.puts text
+      end
+
+      buf.puts
+    in "thoughts"
+      content => { thoughts: }
+      buf.indent("> ") do
+        buf.puts "[!abstract]- Thoughts"
+        thoughts.each do |thought|
+          buf.puts "- #{thought.fetch(:content)}"
+        end
+      end
+
+      buf.puts
+    in "code"
+      case metadata
+      in { search_queries: }
+        buf.indent("> ") do
+          queries = search_queries.map { |search_query|
+            search_query => { type: "search", q: }
+            "[#{q}]"
+          }.join(" ")
+
+          buf.puts "[!info]- Web Search: #{queries}"
+          buf.puts
+        end
+      else
+        return false
+      end
+    in "reasoning_recap"
+      buf.indent("> ") do
+        buf.puts "[!info]- #{content.fetch(:content)}"
+      end
+    in "app_pairing_content"
+      return false
+    else
+      pp entry
+      raise "Unknown content type `#{content_type}`: #{@page_title}"
+    end
+
+    true
   end
 end
 
