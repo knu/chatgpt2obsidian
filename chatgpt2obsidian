@@ -502,7 +502,7 @@ class ChatGPT2Obsidian
     in "app_pairing_content"
       metadata => { app_pairing: { shared_workspaces: } }
 
-      shared_workspaces.each do |workspace|
+      shared_workspaces.each_with_index do |workspace, i|
         workspace => { id: workspace_id, app_name:, title: }
         content => { context_parts:, custom_instructions: }
 
@@ -513,6 +513,8 @@ class ChatGPT2Obsidian
           custom_instructions => /./ => text
         end
 
+        buf.puts if i > 0
+
         buf.indent("> ") do
           buf.puts "[!quote]- Looked at #{app_name}"
           buf.puts "#### #{title}"
@@ -520,8 +522,6 @@ class ChatGPT2Obsidian
           buf.puts text
           buf.puts "```"
         end
-
-        buf.puts
       end
     else
       pp entry
@@ -548,8 +548,10 @@ class ChatGPT2Obsidian
         output_type = :process
         buf.indent("> ") do
           buf.puts "[!abstract]- Search Results"
-          search_result_groups.each do |group|
+          search_result_groups.each_with_index do |group, i|
             group => { type: "search_result_group", domain:, entries: }
+
+            buf.puts if i > 0
 
             buf.indent("> ") do
               buf.puts "[!info] #{domain}"
@@ -559,12 +561,8 @@ class ChatGPT2Obsidian
                 buf.puts "- " + MD.linked_text(text: title, href: url)
               end
             end
-
-            buf.puts
           end
         end
-
-        buf.puts
       in { async_task_type: "research", async_task_title:, async_task_prompt: }
         output_type = :process
         buf.indent("> ")
@@ -643,8 +641,6 @@ class ChatGPT2Obsidian
         buf.puts "#### #{MD.linked_text(text: title, href: url)}"
         buf.puts text
       end
-
-      buf.puts
     in "thoughts"
       output_type = :process
       content => { thoughts: }
@@ -654,8 +650,6 @@ class ChatGPT2Obsidian
           buf.puts "- #{thought.fetch(:content)}"
         end
       end
-
-      buf.puts
     in "code"
       case metadata
       in { search_queries: }
