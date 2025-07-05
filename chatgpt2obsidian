@@ -311,7 +311,9 @@ class ChatGPT2Obsidian
     }
     traverse.call(root_id.to_sym)
 
-    Tempfile.create(["chatgpt_", ".md"]) do |md|
+    Tempfile.create(["chatgpt_", ".md"]) do |temp_file|
+      md = BufferedLinePrinter.new(temp_file)
+
       frontmatter = {
         "title"            => title,
         @created_key       => created,
@@ -329,7 +331,7 @@ class ChatGPT2Obsidian
       md.puts YAML.dump(frontmatter)
       md.puts "---"
 
-      role = last_role = nil
+      type = last_type = nil
 
       order.each do |msg_id|
         entry = mapping[msg_id]
@@ -340,33 +342,42 @@ class ChatGPT2Obsidian
         next if content_type == "user_editable_context"
 
         buf = BufferedLinePrinter.new(md)
-        buf.puts if last_role
-
-        case role
-        in "user"
-          if last_role != "user"
-            buf.puts "# User"
-          end
-        in "assistant"
-          if last_role in "user" | nil
-            buf.puts "# ChatGPT"
-          end
-        in "tool" | "system"
-          # These roles don't need headers
-        end
 
         begin
-          if process_message_entry(buf, entry)
-            buf.flush
-            last_role = role
+          type = process_message_entry(buf, entry) or next
+
+          case
+          when type == :user && last_type != :user
+            md.puts if last_type
+            md.puts "# User"
+          when type != :user && last_type == :user
+            md.puts if last_type
+            md.puts "# ChatGPT"
           end
+
+          case type
+          in :process
+            if last_type == :process
+              md.indent("> ") do
+                md.puts
+                buf.flush
+              end
+            else
+              buf.flush
+            end
+          else
+            md.puts if last_type
+            buf.flush
+          end
+
+          last_type = type
         rescue => e
           raise "#{e.message}: #{title}"
         end
       end
 
       md.flush
-      md.close
+      temp_file.close
 
       target = determine_target_file(title, conversation_id)
 
@@ -389,8 +400,8 @@ class ChatGPT2Obsidian
         File.write(json_file, JSON.pretty_generate(conversation))
       end
 
-      if !existing_sha256sum || existing_sha256sum != Digest::SHA256.file(md.path).hexdigest
-        FileUtils.cp(md.path, target)
+      if !existing_sha256sum || existing_sha256sum != Digest::SHA256.file(temp_file.path).hexdigest
+        FileUtils.cp(temp_file.path, target)
         puts "Written #{target}"
       end
     end
