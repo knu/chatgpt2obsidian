@@ -147,8 +147,12 @@ class BufferedLinePrinter < StringIO
     end
   end
 
+  def empty?
+    pos == 0
+  end
+
   def flush
-    return if pos == 0
+    return if empty?
 
     @device.puts(string)
     self.string = ""
@@ -621,7 +625,16 @@ class ChatGPT2Obsidian
       else
         case recipient
         in "all" | "bio"
-          buf.puts replace_citation_codes(content.fetch(:parts).reject(&:empty?), metadata)
+          subbuf = BufferedLinePrinter.new(buf)
+          subbuf.puts replace_citation_codes(content.fetch(:parts).reject(&:empty?), metadata)
+
+          unless subbuf.empty?
+            if metadata in { model_slug: }
+              buf.puts "> [!tip] #{model_slug}"
+              buf.puts
+            end
+            subbuf.flush
+          end
         else
           return nil
         end
