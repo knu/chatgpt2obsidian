@@ -111,7 +111,7 @@ module MD
   end
 end
 
-class BufferedPrinter < StringIO
+class BufferedLinePrinter < StringIO
   attr_reader :device, :indent
 
   def initialize(device)
@@ -148,7 +148,9 @@ class BufferedPrinter < StringIO
   end
 
   def flush
-    @device.write(string)
+    return if pos == 0
+
+    @device.puts(string)
     self.string = ""
   end
 end
@@ -337,7 +339,7 @@ class ChatGPT2Obsidian
 
         next if content_type == "user_editable_context"
 
-        buf = BufferedPrinter.new(md)
+        buf = BufferedLinePrinter.new(md)
         buf.puts if last_role
 
         case role
