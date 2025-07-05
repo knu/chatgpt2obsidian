@@ -37,6 +37,7 @@ docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory
 - `-a, --attachments-subdirectory NAME`: Specify custom attachments subdirectory name (default: "attachments")
 - `-c, --created-key KEY`: Specify the frontmatter key for created timestamp (default: "created")
 - `-u, --updated-key KEY`: Specify the frontmatter key for updated timestamp (default: "updated")
+- `--json-output`: Output JSON format for debugging purposes (in addition to markdown)
 - `-h, --help`: Show help message
 
 ### Alternative: Local Ruby Installation
@@ -134,11 +135,13 @@ Ruby is a great language to start with! Here are some steps...
 The script handles various ChatGPT content types:
 
 - **Text messages**: Standard user and assistant conversations
-- **Web search results**: Formatted as Obsidian info callouts
-- **Thoughts**: Internal reasoning displayed in abstract callouts
-- **Images**: Automatically copied and linked
-- **Web pages**: Full page content with source links
+- **Source links**: Proper reference links embedded in response messages
+- **Thoughts**: Internal reasoning including chains of thought displayed in expandable blocks
+- **Web search results**: Included within Thoughts blocks
+- **Images**: Automatically copied and embedded
 - **Code execution**: Search queries and reasoning recaps
+- **Model information**: Shows the model name for each ChatGPT response and includes all model names in frontmatter
+- **Message filtering**: Filters out edited conversation branches using timestamp-based selection
 
 ## File Naming
 
