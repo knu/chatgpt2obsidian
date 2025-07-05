@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 #
-# chatgpt2obsidian - Converts ChatGPT conversations to markdown files for Obsidian
+# chatgpt2obsidian - Converts ChatGPT conversations to Markdown files for Obsidian
 #
 # Copyright (c) 2025 Akinori Musha
 #
@@ -206,7 +206,7 @@ class ChatGPT2Obsidian
         Usage: #{$0} [options] <input_path> <output_directory>
 
             <input_path>: ChatGPT export zip file or its extracted directory
-            <output_directory>: Directory where converted markdown files will be saved
+            <output_directory>: Directory where converted Markdown files will be saved
       BANNER
 
       opts.on("-a", "--attachments-subdirectory NAME",

@@ -1,6 +1,6 @@
 # ChatGPT to Obsidian Converter
 
-This tool converts ChatGPT export data into Obsidian-compatible markdown files with proper frontmatter metadata and formatting.
+This tool converts ChatGPT export data into Obsidian Flavored Markdown files with proper frontmatter metadata and formatting.
 
 ## Features
 
@@ -30,14 +30,14 @@ docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory
 ### Command-line Parameters
 
 - `<input_path>`: ChatGPT export zip file or its extracted directory
-- `<output_directory>`: Directory where converted markdown files will be saved
+- `<output_directory>`: Directory where converted Markdown files will be saved
 
 ### Options
 
 - `-a, --attachments-subdirectory NAME`: Specify custom attachments subdirectory name (default: "attachments")
 - `-c, --created-key KEY`: Specify the frontmatter key for created timestamp (default: "created")
 - `-u, --updated-key KEY`: Specify the frontmatter key for updated timestamp (default: "updated")
-- `--json-output`: Output JSON format for debugging purposes (in addition to markdown)
+- `--json-output`: Output JSON format for debugging purposes (in addition to Markdown)
 - `-h, --help`: Show help message
 
 ### Alternative: Local Ruby Installation
@@ -85,9 +85,9 @@ cd chatgpt2obsidian
 
 ## Output Structure
 
-The script generates one markdown file per conversation from the ChatGPT export data, along with any attachments (images, files) referenced in the conversations.
+The script generates one Markdown file per conversation from the ChatGPT export data, along with any attachments (images, files) referenced in the conversations.
 The output is structured to be compatible with Obsidian's note-taking system, allowing for easy organization and retrieval of conversations.
-Each markdown file is named after the conversation title, sanitized for filesystem compatibility, and includes all relevant metadata.
+Each Markdown file is named after the conversation title, sanitized for filesystem compatibility, and includes all relevant metadata.
 
 ```
 /path/to/vault/subdirectory/
