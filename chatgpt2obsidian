@@ -370,6 +370,12 @@ class ChatGPT2Obsidian
             if last_type == :process
               md.indent("> ") do
                 md.puts
+
+                buf.rewind
+                buf.write buf.string.sub(/\A(?~^```)^> \[!abstract\]- Thoughts\n((?:> .*\n)+)/) {
+                  $1.gsub(/^> /, "")
+                }
+                buf.truncate(buf.tell)
                 buf.flush
               end
             else
@@ -569,21 +575,27 @@ class ChatGPT2Obsidian
       in { search_result_groups: }
         output_type = :process
         buf.indent("> ") do
-          buf.puts "[!abstract]- Search Results"
+          subbuf = BufferedLinePrinter.new(buf)
+          domains = Set[]
+
           search_result_groups.each_with_index do |group, i|
             group => { type: "search_result_group", domain:, entries: }
+            domains << domain
 
-            buf.puts if i > 0
+            subbuf.puts if i > 0
 
-            buf.indent("> ") do
-              buf.puts "[!info] #{domain}"
+            subbuf.indent("> ") do
+              subbuf.puts "[!info] #{domain}"
 
               entries.each do |entry|
                 entry => { type: "search_result", title:, url: }
-                buf.puts "- " + MD.linked_text(text: title, href: url)
+                subbuf.puts "- " + MD.linked_text(text: title, href: url)
               end
             end
           end
+
+          buf.puts "[!abstract]- Search Results: #{domains.map { "[#{it}]" }.join(" ")}"
+          subbuf.flush
         end
       in { async_task_type: "research", async_task_title:, async_task_prompt: }
         output_type = :process
@@ -678,8 +690,9 @@ class ChatGPT2Obsidian
       content => { thoughts: }
       buf.indent("> ") do
         buf.puts "[!abstract]- Thoughts"
-        thoughts.each do |thought|
-          buf.puts "- #{thought.fetch(:content)}"
+        thoughts.each_with_index do |thought, i|
+          buf.puts if i > 0
+          buf.puts thought.fetch(:content)
         end
       end
     in "code"
