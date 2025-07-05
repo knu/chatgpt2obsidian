@@ -306,18 +306,39 @@ class ChatGPT2Obsidian
     return unless root_id
 
     order = []
-    traverse = ->(node) {
-      (mapping[node][:children] || []).each do |child|
-        child = child.to_sym
-        order << child
-        traverse.call(child)
+
+    # Find the latest timestamp in a subtree
+    find_latest_timestamp = ->(mapping, node) {
+      entry = mapping[node] or return 0
+
+      entry[:children]&.map { |child|
+        find_latest_timestamp.call(mapping, child.to_sym)
+      }&.max || entry.dig(:message, :create_time) || 0
+    }
+
+    # Find the main conversation path by selecting the most recent branch at each split
+    find_main_path = ->(node) {
+      if mapping[node] in { children: }
+        case children.map(&:to_sym)
+        in []
+        in [child]
+          order << child
+          find_main_path.call(child)
+        in _ => children
+          newest_child = children.max_by { |child|
+            find_latest_timestamp.call(mapping, child)
+          }
+
+          order << newest_child
+          find_main_path.call(newest_child)
+        end
       end
     }
-    traverse.call(root_id.to_sym)
+
+    find_main_path.call(root_id.to_sym)
 
     models = order.filter_map { |msg_id|
-      entry = mapping[msg_id]
-      entry.dig(:message, :metadata, :model_slug)
+      mapping[msg_id].dig(:message, :metadata, :model_slug)
     }.uniq
 
     Tempfile.create(["chatgpt_", ".md"]) do |temp_file|
