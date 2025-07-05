@@ -285,7 +285,9 @@ class ChatGPT2Obsidian
     FileUtils.mkdir_p(@output_directory)
     FileUtils.mkdir_p(@json_output_directory) if @json_output_directory
 
-    data.each do |conversation|
+    data.sort_by {
+      it[:create_time]
+    }.each do |conversation|
       process_conversation(conversation)
     end
   ensure
@@ -419,6 +421,11 @@ class ChatGPT2Obsidian
 
       target = determine_target_file(title, conversation_id)
 
+      if @json_output_directory
+        json_file = File.join(@json_output_directory, "#{File.basename(target, ".md")}.json")
+        File.write(json_file, JSON.pretty_generate(conversation))
+      end
+
       case existing_file_info[conversation_id]
       in nil
       in { file: existing_file, sha256sum: existing_sha256sum }
@@ -433,15 +440,14 @@ class ChatGPT2Obsidian
         end
       end
 
-      if @json_output_directory
-        json_file = File.join(@json_output_directory, "#{File.basename(target, ".md")}.json")
-        File.write(json_file, JSON.pretty_generate(conversation))
-      end
+      sha256sum = Digest::SHA256.file(temp_file.path).hexdigest
 
-      if !existing_sha256sum || existing_sha256sum != Digest::SHA256.file(temp_file.path).hexdigest
+      if !existing_sha256sum || existing_sha256sum != sha256sum
         FileUtils.cp(temp_file.path, target)
         puts "Written #{target}"
       end
+
+      existing_file_info[conversation_id] = { file: target, sha256sum: }
     end
   end
 
@@ -454,20 +460,17 @@ class ChatGPT2Obsidian
         conversation_id
       end
 
-    case existing_file_info[conversation_id]
-    in { file: }
-      file
-    else
-      original_basename = basename
-      counter = 1
+    target = File.join(@output_directory, "#{basename}.md")
+
+    original_basename = basename
+    counter = 1
+    while existing_file_info.any? { |key, value| key != conversation_id && value[:file] == target }
+      basename = "#{original_basename}_#{counter}"
       target = File.join(@output_directory, "#{basename}.md")
-      while File.exist?(target)
-        basename = "#{original_basename}_#{counter}"
-        target = File.join(@output_directory, "#{basename}.md")
-        counter += 1
-      end
-      target
+      counter += 1
     end
+
+    target
   end
 
   def process_attachment_file(buf, attachments, file_id)
