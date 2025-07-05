@@ -621,7 +621,7 @@ class ChatGPT2Obsidian
       else
         case recipient
         in "all" | "bio"
-          buf.puts content.fetch(:parts).reject(&:empty?)
+          buf.puts replace_citation_codes(content.fetch(:parts).reject(&:empty?), metadata)
         else
           return nil
         end
@@ -688,6 +688,37 @@ class ChatGPT2Obsidian
     end
 
     output_type
+  end
+
+  def replace_citation_codes(parts, metadata)
+    citation_map = build_citation_map(metadata)
+    return parts if citation_map.empty?
+
+    pattern = Regexp.union(citation_map.keys)
+
+    parts.map { |part|
+      case part
+      in String
+        part.gsub(pattern, citation_map)
+      else
+        part
+      end
+    }
+  end
+
+  def build_citation_map(metadata)
+    metadata in { content_references: } or return {}
+
+    content_references.each.with_object({}) { |ref, map|
+      ref in { type: "grouped_webpages", matched_text:, items: } or next
+
+      links = items.map { |item|
+        item => { url:, title: }
+        "\\[#{MD.linked_text(text: title, href: url)}\\]"
+      }
+
+      map[matched_text] = links.join(" ")
+    }
   end
 end
 
