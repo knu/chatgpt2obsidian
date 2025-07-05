@@ -560,9 +560,10 @@ class ChatGPT2Obsidian
     web_search = false
     output_type = :response
 
+    # Metadata processing
     case role
     in "assistant"
-      # Header handling is done in the caller
+      # Nothing particular
     in "tool"
       case metadata
       in { search_result_groups: }
@@ -620,6 +621,7 @@ class ChatGPT2Obsidian
       raise "Unknown role `#{role}` for agent message"
     end
 
+    # Content processing
     case content_type
     in "text"
       if web_search
