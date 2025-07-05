@@ -110,25 +110,91 @@ Each conversation file includes:
 
 Example output:
 
-```markdown
----
-title: "How to learn Ruby programming"
-created: "2024-01-15T10:30:00+09:00"
-updated: "2024-01-15T11:45:00+09:00"
-conversation_id: "abc123def456"
-conversation_url: "https://chat.openai.com/c/abc123def456"
----
+### Visual Comparison: ChatGPT vs Obsidian
 
+Here's how the same conversation appears in ChatGPT versus the converted Obsidian format:
+
+#### ChatGPT - Thoughts with Web Search
+![ChatGPT Thoughts](chatgpt-thoughts.png)
+
+#### Obsidian - Converted Thoughts Block
+![Obsidian Thoughts](obsidian-thoughts.png)
+
+#### ChatGPT - Main Content
+![ChatGPT Contents](chatgpt-contents.png)
+
+#### Obsidian - Converted Content
+![Obsidian Contents](obsidian-contents.png)
+
+#### Obsidian - File Header with Metadata
+![Obsidian Header](obsidian-header.png)
+
+The conversion preserves all the rich content from ChatGPT while making it fully compatible with Obsidian's note-taking system.
+
+### Sample Markdown Output
+
+````markdown
+---
+title: How to learn Ruby programming
+created: 2025-07-05T19:31:55+09:00
+updated: 2025-07-05T20:08:56+09:00
+conversation_id: 6868ff1b-0f5c-8007-8c50-b9faa489d84f
+conversation_url: https://chat.openai.com/c/6868ff1b-0f5c-8007-8c50-b9faa489d84f
+models:
+- o3
+---
 # User
 How do I get started with Ruby programming?
 
 # ChatGPT
-Ruby is a great language to start with! Here are some steps...
 
-> [!info]- Web Search: [ruby tutorial] [programming basics]
-> #### [Ruby Programming Language Official Site](https://www.ruby-lang.org/)
-> Ruby is a dynamic, open source programming language...
+> [!abstract]- Thoughts
+> The user asks, "How do I get started with Ruby programming?" This seems like a straightforward question, but...
+>
+> > [!info]- Web Search: [latest stable release of Ruby programming language July 2025]
+> >
+> > > [!abstract]- Search Results: [www.ruby-lang.org] [endoflife.date] [en.wikipedia.org] [www.jruby.org]
+> > > > [!info] www.ruby-lang.org
+> > > > - [Ruby Releases](https://www.ruby-lang.org/en/downloads/releases/ "Ruby releases by version number ; Ruby 3.4.4, 2025-05-14, download ; Ruby 3.5.0-preview1, 2025-04-18, download...")
+> > > > - [Ruby Programming Language](https://www.ruby-lang.org/en/ "Ruby 3.5.0 preview1 Released. We are pleased to announce the release of Ruby 3.5.0-preview1...")
+>
+> > [!info]- Thought for 14 seconds
+
+> [!tip] o3
+
+Below is a compact, opinionated roadmap that will take you from "I've never touched Ruby" to "I can ship something useful and idiomatic."
+
+### 1  Install Ruby the *right* way (≈ 20 min)
+
+| OS | Good default | Why |
+|----|--------------|-----|
+| macOS / Linux | **rbenv + ruby-build** | Lightweight, one‐command upgrades, plays nicely with system packages |
+| Windows | **RubyInstaller** or **WSL + rbenv** | Native or Unix-like, whichever feels less friction |
+| Anywhere | **asdf-vm** | One manager for many languages (nice if you already juggle Node, Go, etc.) |
+
+> **Tip:** Install the latest stable (today that's 3.4.4) rather than the bleeding-edge preview (3.5.0-preview1) unless you *enjoy* rehearsing release notes.
+
+After installation:
+
+```bash
+ruby -v         # sanity-check
+gem update --system
 ```
+
+### 2  Open a REPL and poke around (≈ 15 min)
+
+```bash
+irb             # ships with Ruby
+```
+
+Type `2.times { puts 'Hello, Ruby' }` and press ↩.
+When curiosity outgrows IRB, install **pry** for a richer console:
+
+```bash
+gem install pry
+pry
+```
+````
 
 ## Content Type Support
 
