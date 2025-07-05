@@ -79,7 +79,7 @@ module MD
   def escape_title(title)
     title = title.strip
 
-    if title.match?(/[\\'"()\n]/)
+    if title.match?(/[\\'"()\s]/)
       escaped = title
         .gsub(/([\\"])/, "\\\\\\1")
         .gsub(/\n(?:[ \f\r\t\v]*\n)+/, "\n")
@@ -609,8 +609,8 @@ class ChatGPT2Obsidian
               subbuf.puts "[!info] #{domain}"
 
               entries.each do |entry|
-                entry => { type: "search_result", title:, url: }
-                subbuf.puts "- " + MD.linked_text(text: title, href: url)
+                entry => { type: "search_result", title:, url:, snippet: }
+                subbuf.puts "- " + MD.linked_text(text: title, href: url, title: snippet)
               end
             end
           end
