@@ -32,6 +32,7 @@ require "bundler/inline"
 gemfile do
   source "https://rubygems.org"
   gem "rubyzip"
+  gem "debug" if ENV["DEBUG"]
 end
 
 require "cgi"
