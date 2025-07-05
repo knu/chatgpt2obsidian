@@ -315,6 +315,11 @@ class ChatGPT2Obsidian
     }
     traverse.call(root_id.to_sym)
 
+    models = order.filter_map { |msg_id|
+      entry = mapping[msg_id]
+      entry.dig(:message, :metadata, :model_slug)
+    }.uniq
+
     Tempfile.create(["chatgpt_", ".md"]) do |temp_file|
       md = BufferedLinePrinter.new(temp_file)
 
@@ -324,6 +329,7 @@ class ChatGPT2Obsidian
         @updated_key       => updated,
         "conversation_id"  => conversation_id,
         "conversation_url" => conversation_url,
+        "models"           => models,
       }
 
       case existing_file_info[conversation_id]
