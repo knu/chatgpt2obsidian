@@ -221,7 +221,7 @@ The script handles various ChatGPT content types:
 ## Limitations
 
 - Not all content types in export files may be supported.
-- Large conversation histories may take time to process.
+- Unescaped special characters such as angle brackets or dollar signs can sometimes be misinterpreted by Obsidian as HTML tags or MathJax expressions.  While automatic escaping is theoretically possible, implementing it reliably is technically complex due to the nuances of the Markdown spec and Obsidian’s own extensions.
 
 ## License
 
