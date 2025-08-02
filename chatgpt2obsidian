@@ -561,7 +561,7 @@ class ChatGPT2Obsidian
 
         if context_parts
           context_part = context_parts.find { |part| part[:workspace_id] == workspace_id }
-          context_part => { text: }
+          context_part in { text: } or next
         else
           custom_instructions => /./ => text
         end
