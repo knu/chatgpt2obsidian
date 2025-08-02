@@ -261,8 +261,9 @@ class ChatGPT2Obsidian
       Zip::File.open(input_path) do |zip_file|
         zip_file.each do |entry|
           path = File.join(@export_dir, entry.name)
-          FileUtils.mkdir_p(File.dirname(path))
-          entry.extract(path)
+          destination_directory = File.dirname(path)
+          FileUtils.mkdir_p(destination_directory)
+          entry.extract(destination_directory:)
         end
       end
     else
