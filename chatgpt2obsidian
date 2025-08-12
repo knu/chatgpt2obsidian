@@ -480,19 +480,39 @@ class ChatGPT2Obsidian
 
   def process_attachment_file(buf, attachments, file_id)
     attachments.find { it[:id] == file_id } => { name: file_name }
-    file_name_with_id = "#{file_id}-#{file_name}"
-    source_path = File.join(@export_dir, file_name_with_id)
+    source_file_name = "#{file_id}-#{file_name}"
+    source_path = File.join(@export_dir, source_file_name)
     if File.exist?(source_path)
       target_dir = File.join(@output_directory, @attachments_subdirectory)
-      target_path = File.join(target_dir, file_name_with_id)
+      target_path = File.join(target_dir, source_file_name)
       unless File.exist?(target_path) && FileUtils.identical?(source_path, target_path)
         FileUtils.mkdir_p(target_dir)
         FileUtils.cp(source_path, target_path, verbose: true)
       end
-      buf.puts MD.image(src: File.join(@attachments_subdirectory, file_name_with_id))
+      buf.puts MD.image(src: File.join(@attachments_subdirectory, source_file_name))
     else
       warn "Skipped a missing attachment file: #{source_path}"
     end
+  end
+
+  def process_sediment_file(buf, file_id)
+    case Dir.glob(File.join(@export_dir, "**/#{file_id}-*")).select { File.file?(it) }
+    in []
+      warn "Skipped a missing sediment file: #{file_id}"
+      return
+    in [source_path]
+      # ok
+    in [source_path, *]
+      warn "Multiple sediment files found for #{file_id}, using the first one: #{source_path}"
+    end
+    source_file_name = File.basename(source_path)
+    target_dir = File.join(@output_directory, @attachments_subdirectory)
+    target_path = File.join(target_dir, File.basename(source_path))
+    unless File.exist?(target_path) && FileUtils.identical?(source_path, target_path)
+      FileUtils.mkdir_p(target_dir)
+      FileUtils.cp(source_path, target_path, verbose: true)
+    end
+    buf.puts MD.image(src: File.join(@attachments_subdirectory, source_file_name))
   end
 
   def process_message_entry(buf, entry)
@@ -524,7 +544,7 @@ class ChatGPT2Obsidian
       end
     in "multimodal_text"
       entry => { message: { metadata: } }
-      metadata => { attachments: }
+      metadata in { attachments: } or attachments = {}
 
       content.fetch(:parts).each do |part|
         case part
@@ -536,6 +556,9 @@ class ChatGPT2Obsidian
           in "file-service"
             file_id = uri.host
             process_attachment_file(buf, attachments, file_id)
+          in "sediment"
+            file_id = uri.host
+            process_sediment_file(buf, file_id)
           end
         else
           raise "Unknown part type: #{part.inspect}"
@@ -690,7 +713,7 @@ class ChatGPT2Obsidian
         end
       end
     in "multimodal_text"
-      metadata => { attachments: }
+      metadata in { attachments: } or attachments = {}
 
       content.fetch(:parts).each do |part|
         case part
@@ -702,6 +725,9 @@ class ChatGPT2Obsidian
           in "file-service"
             file_id = uri.host
             process_attachment_file(buf, attachments, file_id)
+          in "sediment"
+            file_id = uri.host
+            process_sediment_file(buf, file_id)
           end
         else
           raise "Unknown part type: #{part.inspect}"
