@@ -260,10 +260,14 @@ class ChatGPT2Obsidian
 
       Zip::File.open(input_path) do |zip_file|
         zip_file.each do |entry|
-          path = File.join(@export_dir, entry.name)
-          destination_directory = File.dirname(path)
-          FileUtils.mkdir_p(destination_directory)
-          entry.extract(destination_directory:)
+          case name = entry.name
+          when %r{\A/|(?:/|\A)\.\.(?:/|\z)}
+            warn "Skipping an invalid entry: #{entry.name}"
+          else
+            dir = File.dirname(File.join(@export_dir, name))
+            FileUtils.mkdir_p(dir)
+            entry.extract(destination_directory: @export_dir)
+          end
         end
       end
     else
