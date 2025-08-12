@@ -309,6 +309,13 @@ class ChatGPT2Obsidian
     updated = Time.at(update_time)
     conversation_url = "https://chat.openai.com/c/#{conversation_id}"
 
+    target = determine_target_file(title, conversation_id)
+
+    if @json_output_directory
+      json_file = File.join(@json_output_directory, "#{File.basename(target, ".md")}.json")
+      File.write(json_file, JSON.pretty_generate(conversation))
+    end
+
     mapping = conversation[:mapping] || {}
     root_id = mapping.find { |_, v| v[:parent].nil? }&.first
     return unless root_id
@@ -423,13 +430,6 @@ class ChatGPT2Obsidian
 
       md.flush
       temp_file.close
-
-      target = determine_target_file(title, conversation_id)
-
-      if @json_output_directory
-        json_file = File.join(@json_output_directory, "#{File.basename(target, ".md")}.json")
-        File.write(json_file, JSON.pretty_generate(conversation))
-      end
 
       case existing_file_info[conversation_id]
       in nil
