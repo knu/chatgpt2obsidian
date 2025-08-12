@@ -251,7 +251,7 @@ class ChatGPT2Obsidian
     @input_path, @output_directory = remaining_argv
   end
 
-  def locate_conversations_json(input_path)
+  def load_data(input_path)
     if File.directory?(input_path)
       @export_dir = input_path
     elsif input_path.downcase.end_with?(".zip") && File.exist?(input_path)
@@ -277,23 +277,41 @@ class ChatGPT2Obsidian
     conversations_json = File.join(@export_dir, "conversations.json")
 
     if File.file?(conversations_json)
-      conversations_json
+      conversations = JSON.parse(File.read(conversations_json), symbolize_names: true)
     else
       raise "conversations.json is not found in #{input_path}"
     end
+
+    chat_html = File.join(@export_dir, "chat.html")
+
+    if File.file?(chat_html)
+      assets = File.open(chat_html) { |f|
+        f.each_line { |line|
+          json = line[/ assetsJson = \K\{.+\}/] and
+            break JSON.parse(json)
+        }
+      }
+    else
+      raise "chat.html is not found in #{input_path}"
+    end
+
+    {
+      conversations:,
+      assets:,
+    }
   end
 
   def run(argv = ARGV)
     parse_options(argv)
-    conversations_json = locate_conversations_json(@input_path)
-    data = JSON.parse(File.read(conversations_json), symbolize_names: true)
+    load_data(@input_path) => { conversations:, assets: }
+
     FileUtils.mkdir_p(@output_directory)
     FileUtils.mkdir_p(@json_output_directory) if @json_output_directory
 
-    data.sort_by {
+    conversations.sort_by {
       it[:create_time]
     }.each do |conversation|
-      process_conversation(conversation)
+      process_conversation(conversation, assets)
     end
   ensure
     FileUtils.rm_rf(@export_dir) if @export_dir_is_temp
@@ -303,7 +321,7 @@ class ChatGPT2Obsidian
 
   def existing_file_info = @existing_file_info ||= load_existing_file_info
 
-  def process_conversation(conversation)
+  def process_conversation(conversation, assets)
     conversation => { title:, conversation_id:, create_time:, update_time: }
     created = Time.at(create_time)
     updated = Time.at(update_time)
@@ -390,7 +408,7 @@ class ChatGPT2Obsidian
         buf = BufferedLinePrinter.new(md)
 
         begin
-          type = process_message_entry(buf, entry) or next
+          type = process_message_entry(buf, entry, assets:) or next
 
           case
           when type == :user && last_type != :user
@@ -478,59 +496,38 @@ class ChatGPT2Obsidian
     target
   end
 
-  def process_attachment_file(buf, attachments, file_id)
-    attachments.find { it[:id] == file_id } => { name: file_name }
-    source_file_name = "#{file_id}-#{file_name}"
-    source_path = File.join(@export_dir, source_file_name)
-    if File.exist?(source_path)
-      target_dir = File.join(@output_directory, @attachments_subdirectory)
-      target_path = File.join(target_dir, source_file_name)
-      unless File.exist?(target_path) && FileUtils.identical?(source_path, target_path)
-        FileUtils.mkdir_p(target_dir)
-        FileUtils.cp(source_path, target_path, verbose: true)
-      end
-      buf.puts MD.image(src: File.join(@attachments_subdirectory, source_file_name))
-    else
-      warn "Skipped a missing attachment file: #{source_path}"
-    end
-  end
-
-  def process_sediment_file(buf, file_id)
-    case Dir.glob(File.join(@export_dir, "**/#{file_id}-*")).select { File.file?(it) }
-    in []
-      warn "Skipped a missing sediment file: #{file_id}"
+  def process_asset_file(buf, assets, asset_pointer)
+    asset_file = assets.fetch(asset_pointer) {
+      warn "Skipped a missing asset file: #{asset_pointer}"
       return
-    in [source_path]
-      # ok
-    in [source_path, *]
-      warn "Multiple sediment files found for #{file_id}, using the first one: #{source_path}"
-    end
-    source_file_name = File.basename(source_path)
+    }
+    asset_file_name = File.basename(asset_file)
+    source_path = File.join(@export_dir, asset_file)
     target_dir = File.join(@output_directory, @attachments_subdirectory)
-    target_path = File.join(target_dir, File.basename(source_path))
+    target_path = File.join(target_dir, asset_file_name)
     unless File.exist?(target_path) && FileUtils.identical?(source_path, target_path)
       FileUtils.mkdir_p(target_dir)
       FileUtils.cp(source_path, target_path, verbose: true)
     end
-    buf.puts MD.image(src: File.join(@attachments_subdirectory, source_file_name))
+    buf.puts MD.image(src: File.join(@attachments_subdirectory, asset_file_name))
   end
 
-  def process_message_entry(buf, entry)
+  def process_message_entry(buf, entry, assets:)
     entry => { message: { author:, content:, metadata:, recipient: } }
     author => { role: }
     content => { content_type: }
 
     case [role, content_type]
     in [_, "user_editable_context" | "app_pairing_content"]
-      process_context_message(buf, entry)
+      process_context_message(buf, entry, assets:)
     in ["user", _]
-      process_user_message(buf, entry)
+      process_user_message(buf, entry, assets:)
     else
-      process_agent_message(buf, entry)
+      process_agent_message(buf, entry, assets:)
     end
   end
 
-  def process_user_message(buf, entry)
+  def process_user_message(buf, entry, assets:)
     entry => { message: { content:, recipient: } }
     content => { content_type: }
 
@@ -551,15 +548,7 @@ class ChatGPT2Obsidian
         in String
           buf.puts part
         in { content_type: "image_asset_pointer", asset_pointer: }
-          uri = URI(asset_pointer)
-          case uri.scheme
-          in "file-service"
-            file_id = uri.host
-            process_attachment_file(buf, attachments, file_id)
-          in "sediment"
-            file_id = uri.host
-            process_sediment_file(buf, file_id)
-          end
+          process_asset_file(buf, assets, asset_pointer)
         else
           raise "Unknown part type: #{part.inspect}"
         end
@@ -572,7 +561,7 @@ class ChatGPT2Obsidian
     :user
   end
 
-  def process_context_message(buf, entry)
+  def process_context_message(buf, entry, assets:)
     entry => { message: { content:, metadata: } }
     content => { content_type: }
 
@@ -611,7 +600,7 @@ class ChatGPT2Obsidian
     :context
   end
 
-  def process_agent_message(buf, entry)
+  def process_agent_message(buf, entry, assets:)
     entry => { message: { author:, content:, metadata:, recipient: } }
     author => { role: }
     content => { content_type: }
@@ -720,15 +709,7 @@ class ChatGPT2Obsidian
         in String
           buf.puts part
         in { content_type: "image_asset_pointer", asset_pointer: }
-          uri = URI(asset_pointer)
-          case uri.scheme
-          in "file-service"
-            file_id = uri.host
-            process_attachment_file(buf, attachments, file_id)
-          in "sediment"
-            file_id = uri.host
-            process_sediment_file(buf, file_id)
-          end
+          process_asset_file(buf, assets, asset_pointer)
         else
           raise "Unknown part type: #{part.inspect}"
         end
