@@ -935,6 +935,9 @@ class ChatGPT2Obsidian
         end
       in { type: "hidden", start_idx:, end_idx: }
         [start_idx, end_idx, ""]
+      in { type: "webpage" | "webpage_extended", matched_text:, start_idx:, end_idx:, title:, url:, snippet:, attribution: }
+        link_title = "#{title}\n\n#{snippet}"
+        [start_idx, end_idx, " \\[#{MD.linked_text(text: attribution, href: url, title: link_title)}\\]"]
       else
         nil
       end
