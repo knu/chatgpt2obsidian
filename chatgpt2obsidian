@@ -746,7 +746,7 @@ class ChatGPT2Obsidian
         case recipient
         in "all" | "bio"
           subbuf = BufferedLinePrinter.new(buf)
-          subbuf.puts replace_codes(content.fetch(:parts).reject(&:empty?), metadata)
+          subbuf.puts replace_codes(content.fetch(:parts).reject(&:empty?), metadata, assets:)
 
           unless subbuf.empty?
             if metadata in { model_slug: }
@@ -833,7 +833,7 @@ class ChatGPT2Obsidian
     end
   end
 
-  def build_code_replacement_map(metadata)
+  def build_code_replacement_map(metadata, assets:)
     metadata in { content_references: } or return {}
 
     content_references.each.with_object({}) { |ref, map|
@@ -939,14 +939,24 @@ class ChatGPT2Obsidian
         buf.puts "| #{cells.join(" | ")} |"
 
         map[matched_text] = buf.flush(&:rstrip) + "\n"
+      in { type: "file", matched_text:, name:, id: }
+        if asset_file = assets.each_value.find { |file_path| file_path.include?(id) }
+          asset_file_name = File.basename(asset_file)
+          asset_path = File.join(@attachments_subdirectory, asset_file_name)
+          logger.debug "Found asset file for #{id}: #{asset_file}: \"#{@current_conversation_title}\""
+          map[matched_text] = "📎 #{MD.linked_text(text: name, href: asset_path)}"
+        else
+          logger.debug "Asset file not found for #{id}: #{name}: \"#{@current_conversation_title}\""
+          map[matched_text] = "📎 **#{name}**"
+        end
       else
         # skip
       end
     }
   end
 
-  def replace_codes(parts, metadata)
-    replacement_map = build_code_replacement_map(metadata)
+  def replace_codes(parts, metadata, assets:)
+    replacement_map = build_code_replacement_map(metadata, assets:)
     return parts if replacement_map.empty?
 
     parts.map { |part|
