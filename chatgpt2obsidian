@@ -152,11 +152,13 @@ class BufferedLinePrinter < StringIO
     pos == 0
   end
 
-  def flush
-    return if empty?
+  def flush(&block)
+    return "" if empty?
 
-    @device.puts(string)
+    output = block ? block.call(string) : string
+    @device.puts(output)
     self.string = ""
+    output
   end
 end
 
@@ -790,8 +792,7 @@ class ChatGPT2Obsidian
 
         map[normalize_code(matched_text)] = links.join(" ")
       in { type: "products", matched_text:, alt:, products: }
-        replacement = StringIO.new
-        buf = BufferedLinePrinter.new(replacement)
+        buf = BufferedLinePrinter.new(StringIO.new)
 
         headers = products.map { |product|
           product => { featured_tag:, image_urls: }
@@ -815,8 +816,7 @@ class ChatGPT2Obsidian
         cells = products.map { |product|
           product => { title:, url:, merchants:, price:, featured_tag:, image_urls:, rating:, num_reviews: }
 
-          cell_content = StringIO.new
-          cell_buf = BufferedLinePrinter.new(cell_content)
+          cell_buf = BufferedLinePrinter.new(StringIO.new)
 
           cell_buf.puts "**#{MD.linked_text(text: title, href: url)}**"
 
@@ -835,14 +835,12 @@ class ChatGPT2Obsidian
             cell_buf.puts merchants
           end
 
-          cell_buf.flush
-          cell_content.string.strip.gsub(/\|/, "\\|").gsub(/\n/, "<br>")
+          cell_buf.flush { |content| content.strip.gsub(/\|/, "\\|").gsub(/\n/, "<br>") }
         }
 
         buf.puts "| #{cells.join(" | ")} |"
 
-        buf.flush
-        map[normalize_code(matched_text)] = replacement.string.rstrip
+        map[normalize_code(matched_text)] = buf.flush(&:rstrip)
       in { type: "product_entity", matched_text:, product: { title: } }
         map[normalize_code(matched_text)] = "**#{title}**"
       else
