@@ -31,6 +31,7 @@ require "bundler/inline"
 
 gemfile do
   source "https://rubygems.org"
+  gem "rack"
   gem "rubyzip"
   gem "logger"
   gem "debug" if ENV["DEBUG"]
@@ -43,6 +44,7 @@ require "fileutils"
 require "json"
 require "logger"
 require "optparse"
+require "rack/utils"
 require "stringio"
 require "tempfile"
 require "time"
@@ -944,6 +946,17 @@ class ChatGPT2Obsidian
           " \\[#{MD.linked_text(text: attribution, href: url, title: title)}\\]"
         }
         [start_idx, end_idx, links.join]
+      in { type: "image_inline", matched_text:, start_idx:, end_idx:, alt:, asset_pointer_links: [asset_pointer_link], clicked_from_title:, clicked_from_url: }
+        uri = URI(asset_pointer_link)
+        image_url =
+          case uri.scheme
+          in "browse"
+            Rack::Utils.parse_query(uri.query)["url"]
+          end
+
+        if image_url
+          [start_idx, end_idx, MD.linked_image(src: image_url, alt:, href: clicked_from_url, link_title: clicked_from_title)]
+        end
       in { type: "attribution", start_idx:, end_idx: }
         # Attribution references don't need replacement, skip them
         nil
