@@ -600,7 +600,6 @@ class ChatGPT2Obsidian
       end
     in "multimodal_text"
       entry => { message: { metadata: } }
-      metadata in { attachments: } or attachments = {}
 
       content.fetch(:parts).each do |part|
         case part
@@ -761,8 +760,6 @@ class ChatGPT2Obsidian
         end
       end
     in "multimodal_text"
-      metadata in { attachments: } or attachments = {}
-
       content.fetch(:parts).each do |part|
         case part
         in String
