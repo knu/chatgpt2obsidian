@@ -904,6 +904,41 @@ class ChatGPT2Obsidian
           MD.linked_image(src: thumbnail_url, href: content_url, alt: title, width:, height:)
         }
         map[matched_text] = image_links.join(" ") + "<br>\n"
+      in { type: "nav_list", matched_text:, title:, items: }
+        buf = BufferedLinePrinter.new(StringIO.new)
+
+        buf.puts "### #{title}"
+        buf.puts
+
+        headers = items.map { |item|
+          if item[:thumbnail_url]
+            MD.image(src: item[:thumbnail_url], alt: item[:title])
+          else
+            ""
+          end
+        }
+        buf.puts "| #{headers.join(" | ")} |"
+        buf.puts "| #{headers.map { "---" }.join(" | ")} |"
+
+        cells = items.map { |item|
+          item => { title: item_title, url:, attribution:, pub_date: }
+
+          cell_buf = BufferedLinePrinter.new(StringIO.new)
+
+          cell_buf.puts attribution
+          cell_buf.puts "**#{MD.linked_text(text: item_title, href: url)}**"
+          cell_buf.puts
+
+          if pub_date
+            cell_buf.puts Time.at(pub_date).strftime("%F")
+          end
+
+          cell_buf.flush { |content| content.strip.gsub(/\|/, "\\|").gsub(/\n/, "<br>") }
+        }
+
+        buf.puts "| #{cells.join(" | ")} |"
+
+        map[matched_text] = buf.flush(&:rstrip) + "\n"
       else
         # skip
       end
