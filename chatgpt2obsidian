@@ -32,6 +32,7 @@ require "bundler/inline"
 gemfile do
   source "https://rubygems.org"
   gem "rubyzip"
+  gem "logger"
   gem "debug" if ENV["DEBUG"]
 end
 
@@ -40,6 +41,7 @@ require "debug" if ENV["DEBUG"]
 require "digest"
 require "fileutils"
 require "json"
+require "logger"
 require "optparse"
 require "stringio"
 require "tempfile"
@@ -176,6 +178,16 @@ class ChatGPT2Obsidian
     @json_output_directory = nil
     @export_dir_is_temp = false
     @export_dir = nil
+    @verbose = false
+  end
+
+  def logger
+    @logger ||=
+      Logger.new(
+        $stderr,
+        level: @verbose ? Logger::DEBUG : Logger::INFO,
+        formatter: ->(severity, datetime, progname, message) { "#{message}\n" }
+      )
   end
 
   def load_existing_file_info
@@ -189,7 +201,7 @@ class ChatGPT2Obsidian
           begin
             YAML.safe_load(yaml_body, permitted_classes: [Date, Time, Symbol])
           rescue StandardError => e
-            warn "Failed to parse frontmatter in #{file}: #{e.message}"
+            logger.warn "Failed to parse frontmatter in #{file}: #{e.message}"
             {}
           end
         else
@@ -231,6 +243,10 @@ class ChatGPT2Obsidian
         @json_output_directory = dir
       end
 
+      opts.on("-v", "--verbose", "Enable verbose debug output") do
+        @verbose = true
+      end
+
       opts.on("-h", "--help", "Show this message") do
         puts opts
         exit
@@ -240,17 +256,19 @@ class ChatGPT2Obsidian
     begin
       remaining_argv = parser.parse(argv)
     rescue OptionParser::InvalidOption => e
-      warn e.message
-      warn parser.help
+      logger.warn e.message
+      logger.warn parser.help
       exit 1
     end
 
     if remaining_argv.size != 2
-      warn parser.help
+      logger.warn parser.help
       exit 1
     end
 
     @input_path, @output_directory = remaining_argv
+
+    logger.debug "Verbose mode enabled" if @verbose
   end
 
   def load_data(input_path)
@@ -264,7 +282,7 @@ class ChatGPT2Obsidian
         zip_file.each do |entry|
           case name = entry.name
           when %r{\A/|(?:/|\A)\.\.(?:/|\z)}
-            warn "Skipping an invalid entry: #{entry.name}"
+            logger.warn "Skipping an invalid entry: #{entry.name}"
           else
             dir = File.dirname(File.join(@export_dir, name))
             FileUtils.mkdir_p(dir)
@@ -467,9 +485,14 @@ class ChatGPT2Obsidian
 
       sha256sum = Digest::SHA256.file(temp_file.path).hexdigest
 
-      if !existing_sha256sum || existing_sha256sum != sha256sum
+      if !existing_sha256sum
         FileUtils.cp(temp_file.path, target)
-        puts "Written #{target}"
+        puts "Created #{target}"
+      elsif existing_sha256sum != sha256sum
+        FileUtils.cp(temp_file.path, target)
+        puts "Updated #{target}"
+      else
+        logger.debug "Unchanged #{target}"
       end
 
       existing_file_info[conversation_id] = { file: target, sha256sum: }
@@ -500,7 +523,7 @@ class ChatGPT2Obsidian
 
   def process_asset_file(buf, assets, asset_pointer)
     asset_file = assets.fetch(asset_pointer) {
-      warn "Skipped a missing asset file: #{asset_pointer}"
+      logger.warn "Skipped a missing asset file: #{asset_pointer}"
       return
     }
     asset_file_name = File.basename(asset_file)
@@ -859,7 +882,7 @@ class ChatGPT2Obsidian
         part.gsub(/\u{E200}\w+\u{E202}.*?\u{E201}/) { |code|
           normalized_code = normalize_code(code)
           replacement_map.fetch(normalized_code) {
-            warn "Unrecognizable code found: #{code}"
+            logger.warn "Unrecognizable code found: #{code}"
             code
           }
         }
