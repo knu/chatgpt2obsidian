@@ -67,6 +67,29 @@ end
 module MD
   module_function
 
+  VOID_ELEMENTS = Set.new(%w[
+    area base br col embed hr img input link meta param source track wbr
+  ]).freeze
+
+  def html_element(name, attrs = {}, &block)
+    attr_str = attrs.filter_map { |k, v|
+      case v
+      when true
+        " #{k}"
+      when false, nil
+        nil
+      else
+        " #{k}=\"#{CGI.escapeHTML(v.to_s)}\""
+      end
+    }.join
+
+    if VOID_ELEMENTS.include?(name.to_s)
+      "<#{name}#{attr_str} />"
+    else
+      "<#{name}#{attr_str}>#{block&.call}</#{name}>"
+    end
+  end
+
   def escape_link_text(text)
     text.strip.gsub(/([\\\[\]*_`~\n])/, '\\\\\\1')
   end
@@ -101,15 +124,25 @@ module MD
     end
   end
 
-  def image(src:, alt: nil, title: nil)
-    "!#{linked_text(text: alt || "", href: src, title:)}"
+  def image(src:, alt: nil, title: nil, width: nil, height: nil)
+    if width || height
+      html_element("img", src:, alt:, title:, width:, height:)
+    else
+      "!#{linked_text(text: alt || "", href: src, title:)}"
+    end
   end
 
-  def linked_image(src:, href:, alt: nil, title: nil, link_title: nil)
-    if link_title
-      "[#{image(alt:, src:, title:)}](#{escape_href(href)} #{escape_title(link_title)})"
+  def linked_image(src:, href:, alt: nil, title: nil, link_title: nil, width: nil, height: nil)
+    if width || height
+      html_element("a", href:, title: link_title) {
+        html_element("img", src:, alt:, title:, width:, height:)
+      }
     else
-      "[#{image(alt:, src:, title:)}](#{escape_href(href)})"
+      if link_title
+        "[#{image(alt:, src:, title:)}](#{escape_href(href)} #{escape_title(link_title)})"
+      else
+        "[#{image(alt:, src:, title:)}](#{escape_href(href)})"
+      end
     end
   end
 end
@@ -867,6 +900,13 @@ class ChatGPT2Obsidian
         map[normalize_code(matched_text)] = buf.flush(&:rstrip)
       in { type: "product_entity", matched_text:, product: { title: } }
         map[normalize_code(matched_text)] = "**#{title}**"
+      in { type: "image_v2", matched_text:, images: }
+        image_links = images.map { |image|
+          image => { content_url:, thumbnail_url:, title:, thumbnail_size: }
+          thumbnail_size => { width:, height: }
+          MD.linked_image(src: thumbnail_url, href: content_url, alt: title, width:, height:)
+        }
+        map[matched_text] = image_links.join(" ") + "<br>\n"
       else
         # skip
       end
