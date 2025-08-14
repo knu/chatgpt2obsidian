@@ -938,6 +938,12 @@ class ChatGPT2Obsidian
       in { type: "webpage" | "webpage_extended", matched_text:, start_idx:, end_idx:, title:, url:, snippet:, attribution: }
         link_title = "#{title}\n\n#{snippet}"
         [start_idx, end_idx, " \\[#{MD.linked_text(text: attribution, href: url, title: link_title)}\\]"]
+      in { type: "sources_footnote", matched_text:, start_idx:, end_idx:, sources: }
+        links = sources.map { |source|
+          source => { title:, url:, attribution: }
+          " \\[#{MD.linked_text(text: attribution, href: url, title: title)}\\]"
+        }
+        [start_idx, end_idx, links.join]
       in { type: "attribution", start_idx:, end_idx: }
         # Attribution references don't need replacement, skip them
         nil
