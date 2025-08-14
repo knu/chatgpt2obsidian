@@ -782,7 +782,7 @@ class ChatGPT2Obsidian
 
     content_references.each.with_object({}) { |ref, map|
       case ref
-      in { type: "grouped_webpages", matched_text:, items: }
+      in { type: "grouped_webpages" | "grouped_webpages_model_predicted_fallback", matched_text:, items: }
         links = items.map { |item|
           item => { url:, title: }
           "\\[#{MD.linked_text(text: title, href: url)}\\]"
