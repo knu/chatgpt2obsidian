@@ -817,35 +817,19 @@ class ChatGPT2Obsidian
     output_type
   end
 
-  def normalize_code(code)
-    # Normalize a code for comparison; some types of codes that appear
-    # as inline text in `parts` are inconsistent with their
-    # definitions represented in the `matched_text` key.
-    case code
-    in /\u{E200}(products)\u{E202}(.*?)\u{E201}/
-      # The product titles don't match, so omit them.
-      [$1, JSON.parse($2)["selections"].map { it[0] }].join(":")
-    in /\u{E200}(product_entity)\u{E202}(.*?)\u{E201}/
-      # The product title doesn't match, so omit it.
-      [$1, JSON.parse($2)[0]].join(":")
-    else
-      code
-    end
-  end
+  def build_code_replacements(metadata, assets:)
+    metadata in { content_references: } or return []
 
-  def build_code_replacement_map(metadata, assets:)
-    metadata in { content_references: } or return {}
-
-    content_references.each.with_object({}) { |ref, map|
+    content_references.filter_map { |ref|
       case ref
-      in { type: "grouped_webpages" | "grouped_webpages_model_predicted_fallback", matched_text:, items: }
+      in { type: "grouped_webpages" | "grouped_webpages_model_predicted_fallback", matched_text:, start_idx:, end_idx:, items: }
         links = items.map { |item|
           item => { url:, title: }
           "\\[#{MD.linked_text(text: title, href: url)}\\]"
         }
 
-        map[normalize_code(matched_text)] = links.join(" ")
-      in { type: "products", matched_text:, alt:, products: }
+        [start_idx, end_idx, links.join(" ")]
+      in { type: "products", matched_text:, start_idx:, end_idx:, alt:, products: }
         buf = BufferedLinePrinter.new(StringIO.new)
 
         headers = products.map { |product|
@@ -894,17 +878,17 @@ class ChatGPT2Obsidian
 
         buf.puts "| #{cells.join(" | ")} |"
 
-        map[normalize_code(matched_text)] = buf.flush(&:rstrip)
-      in { type: "product_entity", matched_text:, product: { title: } }
-        map[normalize_code(matched_text)] = "**#{title}**"
-      in { type: "image_v2", matched_text:, images: }
+        [start_idx, end_idx, buf.flush(&:rstrip)]
+      in { type: "product_entity", matched_text:, start_idx:, end_idx:, product: { title: } }
+        [start_idx, end_idx, "**#{title}**"]
+      in { type: "image_v2", matched_text:, start_idx:, end_idx:, images: }
         image_links = images.map { |image|
           image => { content_url:, thumbnail_url:, title:, thumbnail_size: }
           thumbnail_size => { width:, height: }
           MD.linked_image(src: thumbnail_url, href: content_url, alt: title, width:, height:)
         }
-        map[matched_text] = image_links.join(" ") + "<br>\n"
-      in { type: "nav_list", matched_text:, title:, items: }
+        [start_idx, end_idx, image_links.join(" ") + "<br>\n"]
+      in { type: "nav_list", matched_text:, start_idx:, end_idx:, title:, items: }
         buf = BufferedLinePrinter.new(StringIO.new)
 
         buf.puts "### #{title}"
@@ -938,38 +922,37 @@ class ChatGPT2Obsidian
 
         buf.puts "| #{cells.join(" | ")} |"
 
-        map[matched_text] = buf.flush(&:rstrip) + "\n"
-      in { type: "file", matched_text:, name:, id: }
+        [start_idx, end_idx, buf.flush(&:rstrip) + "\n"]
+      in { type: "file", matched_text:, start_idx:, end_idx:, name:, id: }
         if asset_file = assets.each_value.find { |file_path| file_path.include?(id) }
           asset_file_name = File.basename(asset_file)
           asset_path = File.join(@attachments_subdirectory, asset_file_name)
           logger.debug "Found asset file for #{id}: #{asset_file}: \"#{@current_conversation_title}\""
-          map[matched_text] = "📎 #{MD.linked_text(text: name, href: asset_path)}"
+          [start_idx, end_idx, "📎 #{MD.linked_text(text: name, href: asset_path)}"]
         else
           logger.debug "Asset file not found for #{id}: #{name}: \"#{@current_conversation_title}\""
-          map[matched_text] = "📎 **#{name}**"
+          [start_idx, end_idx, "📎 **#{name}**"]
         end
       else
-        # skip
+        nil
       end
-    }
+    }.sort.reverse!
   end
 
   def replace_codes(parts, metadata, assets:)
-    replacement_map = build_code_replacement_map(metadata, assets:)
-    return parts if replacement_map.empty?
+    replacements = build_code_replacements(metadata, assets:)
+    return parts if replacements.empty?
 
     parts.map { |part|
       case part
       in String
-        part.gsub(/\u{E200}\w+\u{E202}.*?\u{E201}/) { |code|
-          normalized_code = normalize_code(code)
-          replacement_map.fetch(normalized_code) {
-            logger.warn "Unrecognizable code found: #{code}: \"#{@current_conversation_title}\""
-            code
-          }
-        }
+        result = part.dup
+        replacements.each do |start_idx, end_idx, replacement|
+          result[start_idx...end_idx] = replacement
+        end
+        result
       else
+        logger.warn "Non-text part is found: #{part.inspect}: \"#{@current_conversation_title}\""
         part
       end
     }
