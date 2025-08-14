@@ -91,7 +91,7 @@ module MD
   end
 
   def escape_link_text(text)
-    text.strip.gsub(/([\\\[\]*_`~\n])/, '\\\\\\1')
+    text.strip.gsub(/([\\\[\]*_`~])/, '\\\\\\1').gsub(/\n/, '&#10;')
   end
 
   def escape_href(href)
@@ -108,7 +108,7 @@ module MD
     if title.match?(/[\\'"()\s]/)
       escaped = title
         .gsub(/([\\"])/, "\\\\\\1")
-        .gsub(/\n(?:[ \f\r\t\v]*\n)+/, "\n")
+        .gsub(/\n/, '&#10;')
 
       "\"#{escaped}\""
     else
