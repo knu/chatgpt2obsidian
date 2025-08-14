@@ -343,6 +343,7 @@ class ChatGPT2Obsidian
 
   def process_conversation(conversation, assets)
     conversation => { title:, conversation_id:, create_time:, update_time: }
+    @current_conversation_title = title
     created = Time.at(create_time)
     updated = Time.at(update_time)
     conversation_url = "https://chat.openai.com/c/#{conversation_id}"
@@ -523,7 +524,7 @@ class ChatGPT2Obsidian
 
   def process_asset_file(buf, assets, asset_pointer)
     asset_file = assets.fetch(asset_pointer) {
-      logger.warn "Skipped a missing asset file: #{asset_pointer}"
+      logger.warn "Skipped a missing asset file: #{asset_pointer}: \"#{@current_conversation_title}\""
       return
     }
     asset_file_name = File.basename(asset_file)
@@ -882,7 +883,7 @@ class ChatGPT2Obsidian
         part.gsub(/\u{E200}\w+\u{E202}.*?\u{E201}/) { |code|
           normalized_code = normalize_code(code)
           replacement_map.fetch(normalized_code) {
-            logger.warn "Unrecognizable code found: #{code}"
+            logger.warn "Unrecognizable code found: #{code}: \"#{@current_conversation_title}\""
             code
           }
         }
