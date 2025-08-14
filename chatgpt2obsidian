@@ -933,6 +933,8 @@ class ChatGPT2Obsidian
           logger.debug "Asset file not found for #{id}: #{name}: \"#{@current_conversation_title}\""
           [start_idx, end_idx, "📎 **#{name}**"]
         end
+      in { type: "hidden", start_idx:, end_idx: }
+        [start_idx, end_idx, ""]
       else
         nil
       end
