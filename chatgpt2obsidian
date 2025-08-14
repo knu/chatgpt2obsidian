@@ -688,7 +688,7 @@ class ChatGPT2Obsidian
         case recipient
         in "all" | "bio"
           subbuf = BufferedLinePrinter.new(buf)
-          subbuf.puts replace_citation_codes(content.fetch(:parts).reject(&:empty?), metadata)
+          subbuf.puts replace_codes(content.fetch(:parts).reject(&:empty?), metadata)
 
           unless subbuf.empty?
             if metadata in { model_slug: }
@@ -761,34 +761,113 @@ class ChatGPT2Obsidian
     output_type
   end
 
-  def replace_citation_codes(parts, metadata)
-    citation_map = build_citation_map(metadata)
-    return parts if citation_map.empty?
+  def normalize_code(code)
+    # Normalize a code for comparison; some types of codes that appear
+    # as inline text in `parts` are inconsistent with their
+    # definitions represented in the `matched_text` key.
+    case code
+    in /\u{E200}(products)\u{E202}(.*?)\u{E201}/
+      # The product titles don't match, so omit them.
+      [$1, JSON.parse($2)["selections"].map { it[0] }].join(":")
+    in /\u{E200}(product_entity)\u{E202}(.*?)\u{E201}/
+      # The product title doesn't match, so omit it.
+      [$1, JSON.parse($2)[0]].join(":")
+    else
+      code
+    end
+  end
 
-    pattern = Regexp.union(citation_map.keys)
+  def build_code_replacement_map(metadata)
+    metadata in { content_references: } or return {}
 
-    parts.map { |part|
-      case part
-      in String
-        part.gsub(pattern, citation_map)
+    content_references.each.with_object({}) { |ref, map|
+      case ref
+      in { type: "grouped_webpages", matched_text:, items: }
+        links = items.map { |item|
+          item => { url:, title: }
+          "\\[#{MD.linked_text(text: title, href: url)}\\]"
+        }
+
+        map[normalize_code(matched_text)] = links.join(" ")
+      in { type: "products", matched_text:, alt:, products: }
+        replacement = StringIO.new
+        buf = BufferedLinePrinter.new(replacement)
+
+        headers = products.map { |product|
+          product => { featured_tag:, image_urls: }
+          header_parts = []
+
+          if image_urls
+            header_parts << image_urls.map { |img_url|
+              MD.image(src: img_url, alt: product[:title])
+            }.join(" ")
+          end
+
+          if featured_tag in /./
+            header_parts << featured_tag
+          end
+
+          header_parts.join("<br>")
+        }
+        buf.puts "| #{headers.join(" | ")} |"
+        buf.puts "| #{headers.map { "---" }.join(" | ")} |"
+
+        cells = products.map { |product|
+          product => { title:, url:, merchants:, price:, featured_tag:, image_urls:, rating:, num_reviews: }
+
+          cell_content = StringIO.new
+          cell_buf = BufferedLinePrinter.new(cell_content)
+
+          cell_buf.puts "**#{MD.linked_text(text: title, href: url)}**"
+
+          if rating
+            stars = rating.to_i
+            cell_buf.puts "#{"★" * stars}#{"☆" * (5 - stars)} #{rating} (#{num_reviews})"
+          end
+
+          cell_buf.puts
+
+          if price && !price.empty?
+            cell_buf.puts price
+          end
+
+          if merchants && !merchants.empty?
+            cell_buf.puts merchants
+          end
+
+          cell_buf.flush
+          cell_content.string.strip.gsub(/\|/, "\\|").gsub(/\n/, "<br>")
+        }
+
+        buf.puts "| #{cells.join(" | ")} |"
+
+        buf.flush
+        map[normalize_code(matched_text)] = replacement.string.rstrip
+      in { type: "product_entity", matched_text:, product: { title: } }
+        map[normalize_code(matched_text)] = "**#{title}**"
       else
-        part
+        # skip
       end
     }
   end
 
-  def build_citation_map(metadata)
-    metadata in { content_references: } or return {}
+  def replace_codes(parts, metadata)
+    replacement_map = build_code_replacement_map(metadata)
+    return parts if replacement_map.empty?
 
-    content_references.each.with_object({}) { |ref, map|
-      ref in { type: "grouped_webpages", matched_text:, items: } or next
-
-      links = items.map { |item|
-        item => { url:, title: }
-        "\\[#{MD.linked_text(text: title, href: url)}\\]"
-      }
-
-      map[matched_text] = links.join(" ")
+    parts.map { |part|
+      case part
+      in String
+        part.gsub(/\u{E200}\w+\u{E202}.*?\u{E201}/) { |code|
+          normalized_code = normalize_code(code)
+          replacement_map.fetch(normalized_code) {
+            warn "Unrecognizable code found: #{code}"
+            code
+          }
+        }
+      else
+        part
+      end
     }
   end
 end
