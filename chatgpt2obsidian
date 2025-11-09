@@ -842,6 +842,7 @@ class ChatGPT2Obsidian
           end
         end
       end
+    in "tether_browsing_display" | "system_error"
     else
       pp entry
       raise "Unknown content type `#{content_type}` for agent message"
