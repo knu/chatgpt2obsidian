@@ -826,6 +826,22 @@ class ChatGPT2Obsidian
       buf.indent("> ") do
         buf.puts "[!info]- #{content.fetch(:content)}"
       end
+    in "computer_output"
+      output_type = :process
+      case content
+      in { screenshot: { content_type: "image_asset_pointer", asset_pointer: } }
+        buf.indent("> ") do
+          case content
+          in { state: { type: "computer_initialize_state" } }
+            buf.puts "[!info]- Initializing..."
+            process_asset_file(buf, assets, asset_pointer)
+          in { state: { type: "browser_state", url:, title: } }
+            buf.puts "[!info]- Browser Output: #{MD.linked_text(text: title, href: url)}"
+            buf.puts
+            process_asset_file(buf, assets, asset_pointer)
+          end
+        end
+      end
     else
       pp entry
       raise "Unknown content type `#{content_type}` for agent message"
