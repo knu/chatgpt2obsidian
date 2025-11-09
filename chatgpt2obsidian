@@ -772,6 +772,21 @@ class ChatGPT2Obsidian
           raise "Unknown part type: #{part.inspect}"
         end
       end
+    in "super_widget" if content in { widgets: { navlinks:, images:, videos: } }
+      if navlinks.size > 0
+        raise "Unimplemented #{content_type} found with images" if images.size > 0
+        raise "Unimplemented #{content_type} found with videos" if videos.size > 0
+
+        output_type = :process
+        buf.indent("> ") do
+          buf.puts "[!info]- Navigation Links"
+          navlinks.each do |navlink|
+            navlink => { title:, url:, domain:, snippet: }
+
+            buf.puts "- " + MD.linked_text(text: title, href: url, title: snippet) + " (#{domain})"
+          end
+        end
+      end
     in "sonic_webpage"
       output_type = :process
       content => { url:, title:, domain:, text: }
