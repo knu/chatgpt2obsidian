@@ -1,4 +1,4 @@
-FROM rubylang/ruby:3.4
+FROM rubylang/ruby:4.0
 
 WORKDIR /app
 COPY chatgpt2obsidian /app/
