@@ -1024,6 +1024,8 @@ class ChatGPT2Obsidian
         result = part.dup
         replacements.each do |start_idx, end_idx, replacement|
           result[start_idx...end_idx] = replacement
+        rescue RangeError
+          logger.warn "Skipping an invalid code replacement at #{start_idx}...#{end_idx}: \"#{@current_conversation_title}\""
         end
         result
       else
