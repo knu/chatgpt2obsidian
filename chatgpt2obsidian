@@ -329,30 +329,9 @@ class ChatGPT2Obsidian
       raise "Input path must be a ZIP file or directory containing conversations.json"
     end
 
-    conversations_json = File.join(@export_dir, "conversations.json")
-
-    if File.file?(conversations_json)
-      conversations = JSON.parse(File.read(conversations_json), symbolize_names: true)
-    else
-      raise "conversations.json is not found in #{input_path}"
-    end
-
-    chat_html = File.join(@export_dir, "chat.html")
-
-    if File.file?(chat_html)
-      assets = File.open(chat_html) { |f|
-        f.each_line { |line|
-          json = line[/ assetsJson = \K\{.+\}/] and
-            break JSON.parse(json)
-        }
-      }
-    else
-      raise "chat.html is not found in #{input_path}"
-    end
-
     {
-      conversations:,
-      assets:,
+      conversations: load_conversations(@export_dir),
+      assets: load_assets(@export_dir),
     }
   end
 
@@ -373,6 +352,65 @@ class ChatGPT2Obsidian
   end
 
   private
+
+  def load_conversations(export_dir)
+    conversation_files = Dir.glob(File.join(export_dir, "conversations{,-*}.json")).sort
+    conversation_files.any? or
+      raise "No conversation data files are found in #{export_dir}"
+
+    conversation_files.flat_map { |path|
+      JSON.parse(File.read(path), symbolize_names: true)
+    }
+  end
+
+  def load_assets(export_dir)
+    assets = index_assets(read_raw_assets(export_dir))
+    index_export_dir_assets(assets, export_dir)
+    assets
+  end
+
+  def read_raw_assets(export_dir)
+    chat_html = File.join(export_dir, "chat.html")
+
+    File.file?(chat_html) or
+      raise "chat.html is not found in #{export_dir}"
+
+    File.foreach(chat_html) { |line|
+      json = line[/ assetsJson = \K\{.+\}/] and
+        break JSON.parse(json)
+    } || {}
+  end
+
+  def index_assets(raw_assets)
+    return {} if raw_assets.empty?
+
+    raw_assets.first.last in Array or
+      raise "Unsupported legacy assetsJson format"
+
+    raw_assets.each_with_object({}) { |(_asset_message_id, asset_files), assets|
+      asset_files.each do |path|
+        assets[asset_key(path)] ||= path
+      end
+    }
+  end
+
+  def index_export_dir_assets(assets, export_dir)
+    Dir.glob(File.join(export_dir, "**", "file*")).sort.each do |path|
+      next unless File.file?(path)
+
+      relative_path = path.delete_prefix("#{export_dir}/")
+      assets[asset_key(relative_path)] ||= relative_path
+    end
+  end
+
+  def asset_key(key)
+    case File.basename(key)
+    when /\A(file[-_][^-]+)(?=-|\.|\z)/
+      $1
+    else
+      key
+    end
+  end
 
   def existing_file_info = @existing_file_info ||= load_existing_file_info
 
@@ -558,7 +596,7 @@ class ChatGPT2Obsidian
   end
 
   def process_asset_file(buf, assets, asset_pointer)
-    asset_file = assets.fetch(asset_pointer) {
+    asset_file = assets.fetch(asset_key(asset_pointer)) {
       logger.warn "Skipped a missing asset file: #{asset_pointer}: \"#{@current_conversation_title}\""
       return
     }
@@ -960,7 +998,7 @@ class ChatGPT2Obsidian
 
         [start_idx, end_idx, buf.flush(&:rstrip) + "\n"]
       in { type: "file", matched_text:, start_idx:, end_idx:, name:, id: }
-        if asset_file = assets.each_value.find { |file_path| file_path.include?(id) }
+        if asset_file = assets[id]
           asset_file_name = File.basename(asset_file)
           asset_path = File.join(@attachments_subdirectory, asset_file_name)
           logger.debug "Found asset file for #{id}: #{asset_file}: \"#{@current_conversation_title}\""
