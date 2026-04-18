@@ -1011,6 +1011,14 @@ class ChatGPT2Obsidian
         [start_idx, end_idx, ""]
       in { type: "alt_text" | "entity", start_idx:, end_idx:, alt: }
         [start_idx, end_idx, alt]
+      in { type: "link_title", start_idx:, end_idx:, title:, url:, alt: }
+        replacement =
+          if alt in /./
+            alt
+          else
+            MD.linked_text(text: title, href: url)
+          end
+        [start_idx, end_idx, replacement]
       in { type: "webpage" | "webpage_extended", matched_text:, start_idx:, end_idx:, title:, url:, snippet:, attribution: }
         link_title = "#{title}\n\n#{snippet}"
         [start_idx, end_idx, " \\[#{MD.linked_text(text: attribution, href: url, title: link_title)}\\]"]
