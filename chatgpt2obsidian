@@ -200,7 +200,7 @@ class BufferedLinePrinter < StringIO
 end
 
 class ChatGPT2Obsidian
-  attr_reader :attachments_subdirectory, :created_key, :updated_key, :json_output_directory
+  attr_reader :attachments_subdirectory, :maps_subdirectory, :created_key, :updated_key, :json_output_directory
 
   def self.run(argv = ARGV)
     new.run(argv)
@@ -208,6 +208,7 @@ class ChatGPT2Obsidian
 
   def initialize
     @attachments_subdirectory = "attachments"
+    @maps_subdirectory = "maps"
     @created_key = "created"
     @updated_key = "updated"
     @json_output_directory = nil
@@ -261,6 +262,11 @@ class ChatGPT2Obsidian
       opts.on("-a", "--attachments-subdirectory NAME",
               "Specify attachments subdirectory name (default: attachments)") do |name|
         @attachments_subdirectory = name
+      end
+
+      opts.on("--maps-subdirectory NAME",
+              "Specify maps subdirectory name (default: maps)") do |name|
+        @maps_subdirectory = name
       end
 
       opts.on("-c", "--created-key KEY",
@@ -422,6 +428,8 @@ class ChatGPT2Obsidian
     conversation_url = "https://chat.openai.com/c/#{conversation_id}"
 
     target = determine_target_file(title, conversation_id)
+    @current_target = target
+    @current_map_exports = {}
 
     if @json_output_directory
       json_file = File.join(@json_output_directory, "#{File.basename(target, ".md")}.json")
@@ -483,7 +491,7 @@ class ChatGPT2Obsidian
       case existing_file_info[conversation_id]
       in nil
       in { frontmatter: existing_frontmatter }
-        frontmatter.update(existing_frontmatter.except(*frontmatter.keys))
+        frontmatter.update(existing_frontmatter.except(*frontmatter.keys, :locations))
       end
 
       md.puts YAML.dump(frontmatter, stringify_names: true)
@@ -568,6 +576,8 @@ class ChatGPT2Obsidian
       else
         logger.debug "Unchanged #{target}"
       end
+
+      write_map_exports(existing_file:, target:)
 
       existing_file_info[conversation_id] = { file: target, sha256sum: }
     end
@@ -894,6 +904,10 @@ class ChatGPT2Obsidian
 
     content_references.filter_map { |ref|
       case ref
+      in { type: "map", start_idx:, end_idx:, entities:, refs: }
+        if replacement = build_bases_map_embed(entities:, refs:, start_idx:)
+          [start_idx, end_idx, replacement]
+        end
       in { type: "grouped_webpages" | "grouped_webpages_model_predicted_fallback", matched_text:, start_idx:, end_idx:, items: }
         links = items.map { |item|
           item => { url:, title: }
@@ -1058,6 +1072,170 @@ class ChatGPT2Obsidian
         nil
       end
     }.sort.reverse!
+  end
+
+  def build_bases_map_embed(entities:, refs:, start_idx:)
+    places = build_map_places(entities:, refs:)
+    return nil if places.empty?
+
+    map_id = "map-#{Digest::SHA256.hexdigest("#{@current_conversation_title}\0#{start_idx}")[0, 8]}"
+    default_zoom = base_map_zoom(places)
+    map_dir = File.join(map_relative_root(@current_target), map_id)
+    @current_map_exports[map_id] = { map_id:, places: }
+
+    <<~BASE
+      ```base
+      #{build_map_base(folder: map_dir, default_zoom:)}
+      ```
+    BASE
+  end
+
+  def build_map_places(entities:, refs:)
+    select_map_entities(entities:, refs:).filter_map { |entity|
+      latitude = entity[:latitude]
+      longitude = entity[:longitude]
+      name = entity[:name]
+      next unless latitude && longitude && name
+
+      {
+        latitude:,
+        longitude:,
+        name:,
+        address: entity.dig(:entity, :address),
+        website: entity.dig(:entity, :website_url),
+        rating: entity.dig(:entity, :rating),
+      }
+    }
+  end
+
+  def select_map_entities(entities:, refs:)
+    return entities if refs.empty?
+
+    refs.filter_map { |ref|
+      ref_type = ref[:ref_type]
+      ref_index = ref[:ref_index]
+      next unless ref_type == "business"
+      next unless ref_index
+
+      entities[ref_index]
+    }.uniq { |entity|
+      entity[:id] || [entity[:latitude], entity[:longitude], entity[:name]]
+    }
+  end
+
+  def map_export_root(target)
+    File.join(@output_directory, @maps_subdirectory, File.basename(target, ".md"))
+  end
+
+  def map_relative_root(target)
+    File.join(@maps_subdirectory, File.basename(target, ".md"))
+  end
+
+  def write_map_exports(existing_file:, target:)
+    current_root = map_export_root(target)
+    previous_root = existing_file && map_export_root(existing_file)
+
+    if @current_map_exports.empty?
+      FileUtils.rm_rf(current_root)
+      FileUtils.rm_rf(previous_root) if previous_root && previous_root != current_root
+      return
+    end
+
+    FileUtils.rm_rf(current_root)
+    FileUtils.mkdir_p(current_root)
+
+    @current_map_exports.each_value { |export|
+      write_single_map_export(current_root, export)
+    }
+
+    FileUtils.rm_rf(previous_root) if previous_root && previous_root != current_root
+  end
+
+  def write_single_map_export(root, export)
+    export => { map_id:, places: }
+    map_root = File.join(root, map_id)
+    FileUtils.mkdir_p(map_root)
+
+    places.each_with_index do |place, index|
+      write_map_place(map_root, place, index:)
+    end
+  end
+
+  def write_map_place(map_root, place, index:)
+    place => { name:, latitude:, longitude:, address:, website:, rating: }
+    basename = format("%02d %s", index + 1, slugify(name))
+    path = File.join(map_root, "#{basename}.md")
+    body = +""
+    body << MD.linked_text(text: website, href: website) << "\n\n" if website
+    body << "#{address}\n" if address
+
+    frontmatter = {
+      title: name,
+      coordinates: [latitude.to_s, longitude.to_s],
+    }
+    frontmatter[:address] = address if address
+    frontmatter[:website] = website if website
+    frontmatter[:rating] = rating if rating
+
+    File.write(path, "#{YAML.dump(frontmatter, stringify_names: true)}---\n#{body}")
+  end
+
+  def build_map_base(folder:, default_zoom:)
+    folder_filter = %(file.inFolder(this.file.folder + "/#{folder}"))
+
+    YAML.dump(
+      {
+        filters: {
+          and: [
+            folder_filter,
+            %(file.ext == "md"),
+          ],
+        },
+        properties: {
+          "file.name": { displayName: "Place" },
+          "note.rating": { displayName: "Rating" },
+          "note.address": { displayName: "Address" },
+          "note.website": { displayName: "Website" },
+        },
+        views: [
+          {
+            type: "map",
+            name: "Map",
+            order: ["file.name", "note.rating", "note.address", "note.website"],
+            coordinates: "note.coordinates",
+            defaultZoom: default_zoom,
+          },
+          {
+            type: "table",
+            name: "Table",
+            order: ["file.name", "note.rating", "note.address", "note.website"],
+          },
+        ],
+      },
+      stringify_names: true
+    ).delete_prefix("---\n")
+  end
+
+  def base_map_zoom(markers)
+    min_latitude, max_latitude, min_longitude, max_longitude = base_map_bounds(markers)
+    span = [
+      max_latitude - min_latitude,
+      max_longitude - min_longitude,
+    ].max
+
+    return 16 if span.zero?
+
+    zoom = 16 - Math.log2(span / 0.005)
+    zoom.round.clamp(1, 18)
+  end
+
+  def base_map_bounds(markers)
+    latitudes = markers.map { |marker| marker[:latitude] }
+    longitudes = markers.map { |marker| marker[:longitude] }
+    min_latitude, max_latitude = latitudes.minmax
+    min_longitude, max_longitude = longitudes.minmax
+
+    [min_latitude, max_latitude, min_longitude, max_longitude]
   end
 
   def replace_codes(parts, metadata, assets:)

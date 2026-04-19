@@ -6,6 +6,7 @@ This tool converts ChatGPT export data into Obsidian Flavored Markdown files wit
 
 - **Obsidian integration**: Generates files with YAML frontmatter and Obsidian syntax like [Callouts](https://help.obsidian.md/callouts)
 - **Attachment handling**: Copies and links image attachments with proper file organization
+- **Map support**: Exports map search results into official Obsidian Bases Map views backed by generated location notes
 - **Conversation structure**: Preserves the hierarchical structure of ChatGPT conversations
 - **Duplicate prevention**: Handles filename conflicts and tracks existing files
 - **Rich content support**: Processes web search results, thoughts, code blocks, app-pairing contexts, and multimedia content
@@ -25,6 +26,9 @@ docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory
 
 # With custom attachments subdirectory
 docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian --attachments-subdirectory images /input/chatgpt-export.zip /output
+
+# With custom maps subdirectory
+docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory:/output akinori/chatgpt2obsidian --maps-subdirectory geo /input/chatgpt-export.zip /output
 ```
 
 ### Command-line Parameters
@@ -35,9 +39,11 @@ docker run --rm -v /path/to/chatgpt-export:/input -v /path/to/vault/subdirectory
 ### Options
 
 - `-a, --attachments-subdirectory NAME`: Specify custom attachments subdirectory name (default: "attachments")
+- `--maps-subdirectory NAME`: Specify custom maps subdirectory name (default: "maps")
 - `-c, --created-key KEY`: Specify the frontmatter key for created timestamp (default: "created")
 - `-u, --updated-key KEY`: Specify the frontmatter key for updated timestamp (default: "updated")
-- `--json-output`: Output JSON format for debugging purposes (in addition to Markdown)
+- `-j, --json-output DIR`: Output raw conversation JSON files in addition to Markdown
+- `-v, --verbose`: Enable verbose debug output
 - `-h, --help`: Show help message
 
 ### Alternative: Local Ruby Installation
@@ -63,6 +69,9 @@ cd chatgpt2obsidian
 
 # With custom attachments subdirectory
 ./chatgpt2obsidian --attachments-subdirectory images chatgpt-export.zip /path/to/vault/subdirectory
+
+# With custom maps subdirectory
+./chatgpt2obsidian --maps-subdirectory geo chatgpt-export.zip /path/to/vault/subdirectory
 ```
 
 ## ChatGPT Export Process
@@ -87,6 +96,7 @@ cd chatgpt2obsidian
 ## Output Structure
 
 The script generates one Markdown file per conversation from the ChatGPT export data, along with any attachments (images, files) referenced in the conversations.
+If a conversation contains map search results, it also generates location notes in a separate maps subdirectory and embeds an official Obsidian Bases Map view in the conversation note.  Rendering those embeds requires the official Obsidian Maps plugin.
 The output is structured to be compatible with Obsidian's note-taking system, allowing for easy organization and retrieval of conversations.
 Each Markdown file is named after the conversation title, sanitized for filesystem compatibility, and includes all relevant metadata.
 
@@ -97,6 +107,13 @@ Each Markdown file is named after the conversation title, sanitized for filesyst
 ├── attachments/
 │   ├── file-id-1-image-1.png
 │   └── file-id-2-image-2.jpg
+├── maps/
+│   └── conversation_title_1/
+│       ├── map-12345678/
+│       │   ├── 01 Place A.md
+│       │   └── 02 Place B.md
+│       └── map-90abcdef/
+│           └── 01 Place C.md
 └── ...
 ```
 
@@ -108,6 +125,7 @@ Each conversation file includes:
 - **Proper formatting** for user and assistant messages
 - **Obsidian callouts** for search results, thoughts, code blocks, app-pairing contexts, and multimedia content
 - **Linked attachments** with automatic file copying
+- **Map embeds** using official Obsidian Bases Map views when ChatGPT responses include location search results
 
 Example output:
 
@@ -206,6 +224,7 @@ The script handles various ChatGPT content types:
 - **Thoughts**: Internal reasoning including chains of thought displayed in expandable blocks
 - **Web search results**: Included within Thoughts blocks
 - **Images**: Automatically copied and embedded
+- **Maps**: Exported as generated location notes plus embedded Obsidian Bases Map views
 - **Code execution**: Search queries and reasoning recaps
 - **Model information**: Shows the model name for each ChatGPT response and includes all model names in frontmatter
 - **Message filtering**: Filters out edited conversation branches using timestamp-based selection
