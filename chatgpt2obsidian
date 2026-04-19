@@ -1166,8 +1166,7 @@ class ChatGPT2Obsidian
     basename = format("%02d %s", index + 1, slugify(name))
     path = File.join(map_root, "#{basename}.md")
     body = +""
-    body << MD.linked_text(text: website, href: website) << "\n\n" if website
-    body << "#{address}\n" if address
+    body << "Google Maps (#{MD.linked_text(text: "Place", href: google_maps_place_url(name:, address:))} / #{MD.linked_text(text: "Coordinates", href: google_maps_coordinates_url(latitude:, longitude:))})\n\n"
 
     frontmatter = {
       title: name,
@@ -1178,6 +1177,20 @@ class ChatGPT2Obsidian
     frontmatter[:rating] = rating if rating
 
     File.write(path, "#{YAML.dump(frontmatter, stringify_names: true)}---\n#{body}")
+  end
+
+  def google_maps_place_url(name:, address:)
+    query = [name, address].compact.join(", ")
+    uri = URI("https://www.google.com/maps/search/")
+    uri.query = URI.encode_www_form(api: 1, query:)
+    uri.to_s
+  end
+
+  def google_maps_coordinates_url(latitude:, longitude:)
+    query = [latitude, longitude].join(", ")
+    uri = URI("https://www.google.com/maps/search/")
+    uri.query = URI.encode_www_form(api: 1, query:)
+    uri.to_s
   end
 
   def build_map_base(folder:, default_zoom:)
