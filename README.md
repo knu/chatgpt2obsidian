@@ -245,7 +245,7 @@ The script handles various ChatGPT content types:
 
 ## License
 
-Copyright (c) 2025 Akinori Musha.
+Copyright (c) 2025-2026 Akinori Musha.
 
 Licensed under the 2-clause BSD license.  See `LICENSE` for details.
 
