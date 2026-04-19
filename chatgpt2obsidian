@@ -234,7 +234,7 @@ class ChatGPT2Obsidian
       frontmatter =
         if yaml_body
           begin
-            YAML.safe_load(yaml_body, permitted_classes: [Date, Time, Symbol])
+            YAML.safe_load(yaml_body, permitted_classes: [Date, Time, Symbol], symbolize_names: true)
           rescue StandardError => e
             logger.warn "Failed to parse frontmatter in #{file}: #{e.message}"
             {}
@@ -242,7 +242,7 @@ class ChatGPT2Obsidian
         else
           {}
         end
-      cid = frontmatter["conversation_id"] or next
+      cid = frontmatter[:conversation_id] or next
 
       mapping[cid] = { file:, frontmatter:, sha256sum: }
     end
@@ -472,12 +472,12 @@ class ChatGPT2Obsidian
       md = BufferedLinePrinter.new(temp_file)
 
       frontmatter = {
-        "title"            => title,
-        @created_key       => created,
-        @updated_key       => updated,
-        "conversation_id"  => conversation_id,
-        "conversation_url" => conversation_url,
-        "models"           => models,
+        title:,
+        @created_key.to_sym => created,
+        @updated_key.to_sym => updated,
+        conversation_id:,
+        conversation_url:,
+        models:,
       }
 
       case existing_file_info[conversation_id]
@@ -486,7 +486,7 @@ class ChatGPT2Obsidian
         frontmatter.update(existing_frontmatter.except(*frontmatter.keys))
       end
 
-      md.puts YAML.dump(frontmatter)
+      md.puts YAML.dump(frontmatter, stringify_names: true)
       md.puts "---"
 
       type = last_type = nil
