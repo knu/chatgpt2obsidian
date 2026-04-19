@@ -74,7 +74,8 @@ cd chatgpt2obsidian
 ```
 /path/to/chatgpt-export
 ├── chat.html
-├── conversations.json
+├── conversations-000.json
+├── conversations-001.json
 ├── file-id-1-image-1.png
 ├── file-id-2-image-2.jpg
 ├── ...
