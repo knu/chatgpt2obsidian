@@ -83,11 +83,13 @@ cd chatgpt2obsidian
 ```
 /path/to/chatgpt-export
 ├── chat.html
+├── conversation_asset_file_names.json
 ├── conversations-000.json
 ├── conversations-001.json
-├── file-id-1-image-1.png
-├── file-id-2-image-2.jpg
+├── file-id-1.dat
+├── file-id-2.dat
 ├── ...
+├── library_files.json
 ├── message_feedback.json
 ├── shared_conversations.json
 └── user.json
@@ -96,6 +98,7 @@ cd chatgpt2obsidian
 ## Output Structure
 
 The script generates one Markdown file per conversation from the ChatGPT export data, along with any attachments (images, files) referenced in the conversations.
+When recent exports store attachments as `.dat` files, the script restores readable output file names from `conversation_asset_file_names.json` when available.
 If a conversation contains map search results, it also generates location notes in a separate maps subdirectory and embeds an official Obsidian Bases Map view in the conversation note.  Rendering those embeds requires the official Obsidian Maps plugin.
 The output is structured to be compatible with Obsidian's note-taking system, allowing for easy organization and retrieval of conversations.
 Each Markdown file is named after the conversation title, sanitized for filesystem compatibility, and includes all relevant metadata.

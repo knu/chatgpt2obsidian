@@ -370,8 +370,9 @@ class ChatGPT2Obsidian
   end
 
   def load_assets(export_dir)
-    assets = index_assets(read_raw_assets(export_dir))
-    index_export_dir_assets(assets, export_dir)
+    asset_file_names = read_asset_file_names(export_dir)
+    assets = index_assets(read_raw_assets(export_dir), asset_file_names:)
+    index_export_dir_assets(assets, export_dir, asset_file_names:)
     assets
   end
 
@@ -387,7 +388,12 @@ class ChatGPT2Obsidian
     } || {}
   end
 
-  def index_assets(raw_assets)
+  def read_asset_file_names(export_dir)
+    path = File.join(export_dir, "conversation_asset_file_names.json")
+    File.file?(path) ? JSON.parse(File.read(path)) : {}
+  end
+
+  def index_assets(raw_assets, asset_file_names:)
     return {} if raw_assets.empty?
 
     raw_assets.first.last in Array or
@@ -395,27 +401,34 @@ class ChatGPT2Obsidian
 
     raw_assets.each_with_object({}) { |(_asset_message_id, asset_files), assets|
       asset_files.each do |path|
-        assets[asset_key(path)] ||= path
+        assets[asset_key(path)] ||= asset_entry(path, asset_file_names:)
       end
     }
   end
 
-  def index_export_dir_assets(assets, export_dir)
+  def index_export_dir_assets(assets, export_dir, asset_file_names:)
     Dir.glob(File.join(export_dir, "**", "file*")).sort.each do |path|
       next unless File.file?(path)
 
       relative_path = path.delete_prefix("#{export_dir}/")
-      assets[asset_key(relative_path)] ||= relative_path
+      assets[asset_key(relative_path)] ||= asset_entry(relative_path, asset_file_names:)
     end
   end
 
   def asset_key(key)
     case File.basename(key)
-    when /\A(file[-_][^-]+)(?=-|\.|\z)/
+    when /\A(file-[^-.]+|file_[^-.]+)(?=-|\.|\z)/
       $1
     else
       key
     end
+  end
+
+  def asset_entry(path, asset_file_names:)
+    original_name = File.basename(asset_file_names[path] || path)
+    basename = File.basename(path)
+    name = basename.end_with?(".dat") ? "#{basename.delete_suffix(".dat")}-#{original_name}" : basename
+    { path:, name: }
   end
 
   def existing_file_info = @existing_file_info ||= load_existing_file_info
@@ -437,6 +450,7 @@ class ChatGPT2Obsidian
     end
 
     mapping = conversation[:mapping] || {}
+    children_by_parent = build_children_by_parent(mapping)
     root_id = mapping.find { |_, v| v[:parent].nil? }&.first
     return unless root_id
 
@@ -446,27 +460,25 @@ class ChatGPT2Obsidian
     find_latest_timestamp = ->(mapping, node) {
       entry = mapping[node] or return 0
 
-      entry[:children]&.map { |child|
+      children_by_parent.fetch(node, []).map { |child|
         find_latest_timestamp.call(mapping, child.to_sym)
-      }&.max || entry.dig(:message, :create_time) || 0
+      }.max || entry.dig(:message, :create_time) || 0
     }
 
     # Find the main conversation path by selecting the most recent branch at each split
     find_main_path = ->(node) {
-      if mapping[node] in { children: }
-        case children.map(&:to_sym)
-        in []
-        in [child]
-          order << child
-          find_main_path.call(child)
-        in _ => children
-          newest_child = children.max_by { |child|
-            find_latest_timestamp.call(mapping, child)
-          }
+      case children_by_parent.fetch(node, [])
+      in []
+      in [child]
+        order << child
+        find_main_path.call(child)
+      in _ => children
+        newest_child = children.max_by { |child|
+          find_latest_timestamp.call(mapping, child)
+        }
 
-          order << newest_child
-          find_main_path.call(newest_child)
-        end
+        order << newest_child
+        find_main_path.call(newest_child)
       end
     }
 
@@ -605,13 +617,22 @@ class ChatGPT2Obsidian
     target
   end
 
+  def build_children_by_parent(mapping)
+    mapping.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |(id, entry), children_by_parent|
+      parent = entry[:parent]&.to_sym or next
+      next unless mapping.key?(parent)
+
+      children_by_parent[parent] << id.to_sym
+    end
+  end
+
   def process_asset_file(buf, assets, asset_pointer)
-    asset_file = assets.fetch(asset_key(asset_pointer)) {
+    asset = assets.fetch(asset_key(asset_pointer)) {
       logger.warn "Skipped a missing asset file: #{asset_pointer}: \"#{@current_conversation_title}\""
       return
     }
-    asset_file_name = File.basename(asset_file)
-    source_path = File.join(@export_dir, asset_file)
+    asset_file_name = asset.fetch(:name)
+    source_path = File.join(@export_dir, asset.fetch(:path))
     target_dir = File.join(@output_directory, @attachments_subdirectory)
     target_path = File.join(target_dir, asset_file_name)
     unless File.exist?(target_path) && FileUtils.identical?(source_path, target_path)
@@ -622,22 +643,26 @@ class ChatGPT2Obsidian
   end
 
   def process_message_entry(buf, entry, assets:)
-    entry => { message: { author:, content:, metadata:, recipient: } }
+    entry => { message: }
+    message => { author:, content: }
     author => { role: }
     content => { content_type: }
+    # Recent exports omit recipient, and often omit metadata for user
+    # messages and empty system messages.
+    message in { metadata: } or metadata = {}
+    message in { recipient: } or recipient = "all"
 
     case [role, content_type]
     in [_, "user_editable_context" | "app_pairing_content"]
-      process_context_message(buf, entry, assets:)
+      process_context_message(buf, content:, metadata:)
     in ["user", _]
-      process_user_message(buf, entry, assets:)
+      process_user_message(buf, content:, recipient:, assets:)
     else
-      process_agent_message(buf, entry, assets:)
+      process_agent_message(buf, author:, content:, metadata:, recipient:, assets:)
     end
   end
 
-  def process_user_message(buf, entry, assets:)
-    entry => { message: { content:, recipient: } }
+  def process_user_message(buf, content:, recipient:, assets:)
     content => { content_type: }
 
     case content_type
@@ -649,8 +674,6 @@ class ChatGPT2Obsidian
         return nil
       end
     in "multimodal_text"
-      entry => { message: { metadata: } }
-
       content.fetch(:parts).each do |part|
         case part
         in String
@@ -662,22 +685,35 @@ class ChatGPT2Obsidian
         end
       end
     else
-      pp entry
       raise "Unknown content type `#{content_type}` for user message"
     end
 
     :user
   end
 
-  def process_context_message(buf, entry, assets:)
-    entry => { message: { content:, metadata: } }
+  def process_context_message(buf, content:, metadata:)
     content => { content_type: }
 
     case content_type
     in "user_editable_context"
       return nil
     in "app_pairing_content"
-      metadata => { app_pairing: { shared_workspaces: } }
+      # Recent exports no longer include app_pairing metadata, so the
+      # app/window structure is not generally recoverable.
+      unless metadata in { app_pairing: { shared_workspaces: } }
+        if content in { custom_instructions: /./ => text }
+          buf.indent("> ") do
+            buf.puts "[!quote]- Looked at app context"
+            buf.puts "```"
+            buf.puts text
+            buf.puts "```"
+          end
+
+          return :context
+        end
+
+        return nil
+      end
 
       shared_workspaces.each_with_index do |workspace, i|
         workspace => { id: workspace_id, app_name:, title: }
@@ -701,15 +737,13 @@ class ChatGPT2Obsidian
         end
       end
     else
-      pp entry
       raise "Unknown content type `#{content_type}` for context message"
     end
 
     :context
   end
 
-  def process_agent_message(buf, entry, assets:)
-    entry => { message: { author:, content:, metadata:, recipient: } }
+  def process_agent_message(buf, author:, content:, metadata:, recipient:, assets:)
     author => { role: }
     content => { content_type: }
 
@@ -729,7 +763,7 @@ class ChatGPT2Obsidian
           domains = Set[]
 
           search_result_groups.each_with_index do |group, i|
-            group => { type: "search_result_group", domain:, entries: }
+            group => { domain:, entries: }
             domains << domain
 
             subbuf.puts if i > 0
@@ -738,7 +772,7 @@ class ChatGPT2Obsidian
               subbuf.puts "[!info] #{domain}"
 
               entries.each do |entry|
-                entry => { type: "search_result", title:, url:, snippet: }
+                entry => { title:, url:, snippet: }
                 subbuf.puts "- " + MD.linked_text(text: title, href: url, title: snippet)
               end
             end
@@ -775,11 +809,10 @@ class ChatGPT2Obsidian
       end
     in "system"
       return nil if metadata in { is_visually_hidden_from_conversation: true }
+      return nil if content in { content_type: "text", parts: } && parts.all?(&:empty?)
 
-      pp entry
       raise "Unexpected system message with unhidden content"
     else
-      pp entry
       raise "Unknown role `#{role}` for agent message"
     end
 
@@ -892,7 +925,6 @@ class ChatGPT2Obsidian
       end
     in "tether_browsing_display" | "system_error"
     else
-      pp entry
       raise "Unknown content type `#{content_type}` for agent message"
     end
 
@@ -1012,10 +1044,10 @@ class ChatGPT2Obsidian
 
         [start_idx, end_idx, buf.flush(&:rstrip) + "\n"]
       in { type: "file", matched_text:, start_idx:, end_idx:, name:, id: }
-        if asset_file = assets[id]
-          asset_file_name = File.basename(asset_file)
+        if asset = assets[asset_key(id)]
+          asset_file_name = asset.fetch(:name)
           asset_path = File.join(@attachments_subdirectory, asset_file_name)
-          logger.debug "Found asset file for #{id}: #{asset_file}: \"#{@current_conversation_title}\""
+          logger.debug "Found asset file for #{id}: #{asset.fetch(:path)}: \"#{@current_conversation_title}\""
           [start_idx, end_idx, "📎 #{MD.linked_text(text: name, href: asset_path)}"]
         else
           logger.debug "Asset file not found for #{id}: #{name}: \"#{@current_conversation_title}\""
