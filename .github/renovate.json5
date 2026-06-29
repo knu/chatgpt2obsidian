@@ -15,10 +15,6 @@
   "prConcurrentLimit": 3,
   "prHourlyLimit": 2,
   "semanticCommits": "enabled",
-  "docker": {
-    "enabled": true,
-    "pinDigests": false,
-  },
   "dockerfile": {
     "enabled": true,
   },
@@ -27,6 +23,11 @@
     "pinDigests": false,
   },
   "packageRules": [
+    {
+      "matchCategories": ["docker"],
+      "enabled": true,
+      "pinDigests": false,
+    },
     {
       "matchDatasources": ["docker"],
       "matchPackageNames": ["rubylang/ruby"],
@@ -43,13 +44,13 @@
       ],
     },
     {
-      "matchPackagePatterns": ["^actions/"],
+      "matchPackageNames": ["/^actions\\//"],
       "groupName": "GitHub official actions",
       "automerge": true,
       "automergeType": "pr",
     },
     {
-      "matchPackagePatterns": ["^docker/"],
+      "matchPackageNames": ["/^docker\\//"],
       "groupName": "Docker official actions",
       "automerge": true,
       "automergeType": "pr",
