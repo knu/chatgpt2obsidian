@@ -1,0 +1,7 @@
+*.zip
+/AGENTS.md
+/input/
+/input.*/
+/json/
+/output/
+/output.*/
