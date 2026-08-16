@@ -823,7 +823,10 @@ class ChatGPT2Obsidian
         output_type = :process
         buf.indent("> ") do
           buf.puts "[!info]- Web Search"
-          buf.puts content.fetch(:parts).reject(&:empty?)
+          parts = content.fetch(:parts).reject(&:empty?).map {
+            replace_reference_markers(it, metadata)
+          }
+          buf.puts parts
         end
       else
         case recipient
@@ -874,7 +877,7 @@ class ChatGPT2Obsidian
       buf.indent("> ") do
         buf.puts "[!info]- Web Search: #{domain}"
         buf.puts "#### #{MD.linked_text(text: title, href: url)}"
-        buf.puts text
+        buf.puts replace_reference_markers(text, metadata)
       end
     in "thoughts"
       output_type = :process
@@ -941,12 +944,7 @@ class ChatGPT2Obsidian
           [start_idx, end_idx, replacement]
         end
       in { type: "grouped_webpages" | "grouped_webpages_model_predicted_fallback", matched_text:, start_idx:, end_idx:, items: }
-        links = items.map { |item|
-          item => { url:, title: }
-          "\\[#{MD.linked_text(text: title, href: url)}\\]"
-        }
-
-        [start_idx, end_idx, links.join(" ")]
+        [start_idx, end_idx, build_grouped_webpages_links(items)]
       in { type: "products", matched_text:, start_idx:, end_idx:, alt:, products: }
         buf = BufferedLinePrinter.new(StringIO.new)
 
@@ -1287,7 +1285,6 @@ class ChatGPT2Obsidian
 
   def replace_codes(parts, metadata, assets:)
     replacements = build_code_replacements(metadata, assets:)
-    return parts if replacements.empty?
 
     parts.map { |part|
       case part
@@ -1298,12 +1295,66 @@ class ChatGPT2Obsidian
         rescue RangeError
           logger.warn "Skipping an invalid code replacement at #{start_idx}...#{end_idx}: \"#{@current_conversation_title}\""
         end
-        result
+        replace_reference_markers(result, metadata)
       else
         logger.warn "Non-text part is found: #{part.inspect}: \"#{@current_conversation_title}\""
         part
       end
     }
+  end
+
+  def replace_reference_markers(text, metadata)
+    references = metadata.fetch(:content_references, [])
+
+    # Recent exports omit start_idx/end_idx and identify citations by their
+    # turn/reference IDs instead.
+    items_by_reference_id = {}
+    references.each do |reference|
+      next unless reference in {
+        type: "grouped_webpages" | "grouped_webpages_model_predicted_fallback",
+        items:,
+      }
+
+      items.each do |item|
+        item.fetch(:refs, []).each do |ref|
+          ref => { turn_index:, ref_type:, ref_index: }
+          items_by_reference_id["turn#{turn_index}#{ref_type}#{ref_index}"] ||= item
+        end
+      end
+    end
+
+    text.gsub(
+      /(?<prefix> ?)\u{E200}(?<type>[^\u{E201}\u{E202}]+)(?:\u{E202}(?<payload>[^\u{E201}]*))?(?<terminator>\u{E201})?/
+    ) {
+      Regexp.last_match => { prefix:, type: marker_type, payload:, terminator: }
+
+      unless terminator
+        logger.warn "Unterminated content reference marker `#{marker_type}`: \"#{@current_conversation_title}\""
+        next ""
+      end
+
+      case marker_type
+      in "cite"
+        next "" if payload.nil?
+
+        items = payload.scan(/[^\u{E202}]+/).filter_map {
+          items_by_reference_id[it]
+        }.uniq
+        next "" if items.empty?
+
+        "#{prefix}#{build_grouped_webpages_links(items)}"
+      else
+        logger.warn "Unsupported content reference marker `#{marker_type}`: \"#{@current_conversation_title}\""
+        ""
+      end
+    }
+  end
+
+  def build_grouped_webpages_links(items)
+    items.map { |item|
+      item => { url:, title: }
+      "\\[#{MD.linked_text(text: title, href: url)}\\]"
+    }.join(" ")
   end
 end
 
