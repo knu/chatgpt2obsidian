@@ -1329,9 +1329,7 @@ class ChatGPT2Obsidian
     references = metadata.fetch(:content_references, [])
     reference_queue ||= build_reference_queue(metadata)
 
-    # Recent exports omit start_idx/end_idx and identify citations by their
-    # turn/reference IDs instead.
-    items_by_reference_id = {}
+    items_by_reference_id = Hash.new { |hash, key| hash[key] = [] }
     references.each do |reference|
       next unless reference in {
         type: "grouped_webpages" | "grouped_webpages_model_predicted_fallback",
@@ -1341,7 +1339,7 @@ class ChatGPT2Obsidian
       items.each do |item|
         item.fetch(:refs, []).each do |ref|
           ref => { turn_index:, ref_type:, ref_index: }
-          items_by_reference_id["turn#{turn_index}#{ref_type}#{ref_index}"] ||= item
+          items_by_reference_id["turn#{turn_index}#{ref_type}#{ref_index}"] << item
         end
       end
     end
@@ -1361,11 +1359,24 @@ class ChatGPT2Obsidian
 
       case marker_type
       in "cite"
-        next "" if payload.nil?
+        case reference
+        in { type: "grouped_webpages" | "grouped_webpages_model_predicted_fallback", items: } if items.any?
+          next "#{prefix}#{build_grouped_webpages_links(items)}"
+        in { alt: String => alt } if !alt.empty?
+          next "#{prefix}#{alt}"
+        else
+          # Older exports can omit per-marker metadata.  Resolve only IDs
+          # with an unambiguous destination across the message.
+        end
 
-        items = payload.scan(/[^\u{E202}]+/).filter_map {
-          items_by_reference_id[it]
+        ids = payload.to_s.scan(/[^\u{E202}]+/)
+        items = ids.filter_map { |id|
+          candidates = items_by_reference_id[id].uniq { it[:url] }
+          candidates.first if candidates.one?
         }.uniq
+        if ids.empty? || ids.any? { items_by_reference_id[it].map { it[:url] }.uniq.size != 1 }
+          logger.warn "Unresolved web citation: #{payload}: \"#{@current_conversation_title}\""
+        end
         next "" if items.empty?
 
         "#{prefix}#{build_grouped_webpages_links(items)}"

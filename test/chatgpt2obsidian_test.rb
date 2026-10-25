@@ -39,17 +39,44 @@ class ChatGPT2ObsidianTest < Minitest::Test
   end
 
   def test_replace_codes_removes_unresolvable_citation_markers
-    result = @converter.send(
-      :replace_codes,
-      [
-        "Claim. \u{E200}cite\u{E202}turn0search1\u{E201}",
-        "Claim without payload. \u{E200}cite\u{E201}",
-      ],
-      {},
-      assets: {}
-    )
+    result = nil
+    assert_output(nil, /Unresolved web citation/) do
+      result = @converter.send(
+        :replace_codes,
+        [
+          "Claim. \u{E200}cite\u{E202}turn0search1\u{E201}",
+          "Claim without payload. \u{E200}cite\u{E201}",
+        ],
+        {},
+        assets: {}
+      )
+    end
 
     assert_equal ["Claim.", "Claim without payload."], result
+  end
+
+  def test_citations_use_their_own_metadata_when_reference_ids_conflict
+    metadata = { content_references: %w[first second].map { |name|
+      { type: "grouped_webpages", items: [{
+        title: name, url: "https://example.com/#{name}",
+        refs: [{ turn_index: 0, ref_type: "search", ref_index: 0 }],
+      }] }
+    } }
+
+    assert_equal %w[first second].map { "\\[[#{it}](https://example.com/#{it})\\]" }, @converter.send(
+      :replace_codes, ["citeturn0search0", "citeturn0search0"], metadata, assets: {}
+    )
+  end
+
+  def test_citations_use_saved_links_when_marker_ids_do_not_match
+    metadata = { content_references: [
+      { type: "grouped_webpages", items: [{ title: "Source", url: "https://example.com" }] },
+      { type: "grouped_webpages", alt: "[Saved](https://example.com/saved)" },
+    ] }
+
+    assert_equal ["\\[[Source](https://example.com)\\] [Saved](https://example.com/saved)"], @converter.send(
+      :replace_codes, ["citeturn999search0 citeturn999search1"], metadata, assets: {}
+    )
   end
 
   def test_replace_codes_preserves_offsetless_references_in_order_across_parts
@@ -124,11 +151,13 @@ class ChatGPT2ObsidianTest < Minitest::Test
       { type: "product_entity", alt: "Stand" },
     ] }
 
-    assert_equal ["[Docs](https://example.com) Stand"], @converter.send(
-      :replace_codes,
-      ["urlDocshttps://example.com citeturn0search0 fileciteturn0file0 entity[]"],
-      metadata, assets: {}
-    )
+    assert_output(nil, /Unresolved web citation/) do
+      assert_equal ["[Docs](https://example.com) Stand"], @converter.send(
+        :replace_codes,
+        ["urlDocshttps://example.com citeturn0search0 fileciteturn0file0 entity[]"],
+        metadata, assets: {}
+      )
+    end
   end
 
   def test_replace_codes_renders_images_without_alternative_text
