@@ -115,6 +115,30 @@ class ChatGPT2ObsidianTest < Minitest::Test
     )
   end
 
+  def test_linked_text_without_a_destination_is_plain_text
+    [nil, "", "  "].each do |href|
+      assert_equal "Example \\[name\\]", MD.linked_text(text: "Example [name]", href:)
+    end
+    assert_equal "[Example](https://example.com)", MD.linked_text(text: "Example", href: "https://example.com")
+  end
+
+  def test_product_markers_without_destinations_keep_their_names
+    metadata = { content_references: [
+      { type: "products", alt: "### [Stand]()", products: [{
+        title: "Stand", url: "", featured_tag: "", image_urls: [],
+        merchants: "Shop", price: "100", rating: nil, num_reviews: nil,
+      }] },
+      { type: "product_entity", alt: "[Stand [small]]()" },
+    ] }
+    result = @converter.send(
+      :replace_codes, ["products{}\nproduct_entity[\"turn0product0\",\"Stand [small]\"]"], metadata, assets: {}
+    ).first
+
+    refute_includes result, "]()"
+    assert_includes result, "**Stand**"
+    assert_includes result, "Stand \\[small\\]"
+  end
+
   def test_replace_codes_preserves_offsetless_references_in_order_across_parts
     metadata = {
       content_references: [

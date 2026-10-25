@@ -119,6 +119,8 @@ module MD
   end
 
   def linked_text(text:, href:, title: nil)
+    return escape_link_text(text) if href.to_s.strip.empty?
+
     if title
       "[#{escape_link_text(text)}](#{escape_href(href)} #{escape_title(title)})"
     else
@@ -1418,6 +1420,19 @@ class ChatGPT2Obsidian
 
   def render_marker_reference(reference, payload, marker_offset:, assets:)
     case reference
+    in { type: "products", products: }
+      render_offsetless_reference(reference, assets:)
+    in { type: "product_entity", alt: String => alt } if alt.end_with?("]()")
+      begin
+        case JSON.parse(payload.to_s)
+        in [String, String => name]
+          MD.escape_link_text(name)
+        else
+          alt
+        end
+      rescue JSON::ParserError
+        alt
+      end
     in { type: "map", entities: }
       start_idx = "#{marker_offset}:#{@current_map_exports.size}"
       build_bases_map_embed(entities:, refs: reference.fetch(:refs, []), start_idx:)
@@ -1431,11 +1446,15 @@ class ChatGPT2Obsidian
     in { alt: String => alt }
       alt
     else
-      build_code_replacements(
-        { content_references: [reference.merge(matched_text: "", start_idx: 0, end_idx: 0)] },
-        assets:
-      ).first&.last
+      render_offsetless_reference(reference, assets:)
     end
+  end
+
+  def render_offsetless_reference(reference, assets:)
+    build_code_replacements(
+      { content_references: [reference.merge(matched_text: "", start_idx: 0, end_idx: 0)] },
+      assets:
+    ).first&.last
   end
 
   def build_grouped_webpages_links(items)
