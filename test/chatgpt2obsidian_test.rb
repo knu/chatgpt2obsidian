@@ -139,6 +139,40 @@ class ChatGPT2ObsidianTest < Minitest::Test
     assert_includes result, "Stand \\[small\\]"
   end
 
+  def test_math_widgets_render_commands_without_changing_row_separators
+    ["y=\\\\frac{5}{15}x", "y=\\frac{5}{15}x"].each do |content|
+      payload = JSON.generate(math_block_widget_always_prefetch_v2: { content: })
+      result = @converter.send(:render_widget, payload)
+      assert_equal "\n$$\ny=\\frac{5}{15}x\n$$\n", result
+    end
+    content = "\\begin{matrix}1 & 2\\\\3 & 4\\end{matrix}"
+    assert_includes @converter.send(:render_widget, JSON.generate(math_block_widget_always_prefetch_v2: { content: })), content
+    escaped = content.gsub("\\", "\\\\")
+    assert_includes @converter.send(:render_widget, JSON.generate(math_block_widget_always_prefetch_v2: { content: escaped })), content
+  end
+
+  def test_chart_widgets_render_series_as_an_escaped_table
+    payload = JSON.generate(chart: { content: {
+      meta: { title: "Chart", description: "Description" },
+      xKey: "name",
+      series: [{ dataKey: "share", label: "Share", valueSuffix: "%" }, { dataKey: "count", label: "Count" }],
+      data: [{ name: "A | B\nC", share: 12.5, count: 0 }, { name: "Other", share: nil, count: 2 }],
+    } })
+
+    assert_equal "\n**Chart**\n\nDescription\n\n| name | Share | Count |\n| --- | --- | --- |\n| A \\| B<br>C | 12.5% | 0 |\n| Other |  | 2 |\n", @converter.send(:render_widget, payload)
+  end
+
+  def test_unknown_widgets_keep_their_json_and_invalid_json_is_rejected
+    [
+      { data: [] },
+      { xKey: "x", series: [{ dataKey: "y" }], data: [{ x: "A", y: { nested: 1 } }] },
+    ].each do |content|
+      payload = JSON.generate(chart: { content: })
+      assert_equal "\n```json\n#{JSON.pretty_generate(JSON.parse(payload))}\n```\n", @converter.send(:render_widget, payload)
+    end
+    assert_nil @converter.send(:render_widget, "invalid")
+  end
+
   def test_replace_codes_preserves_offsetless_references_in_order_across_parts
     metadata = {
       content_references: [

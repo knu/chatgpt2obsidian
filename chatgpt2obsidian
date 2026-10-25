@@ -1437,12 +1437,7 @@ class ChatGPT2Obsidian
       start_idx = "#{marker_offset}:#{@current_map_exports.size}"
       build_bases_map_embed(entities:, refs: reference.fetch(:refs, []), start_idx:)
     in { type: "client_defined_widget" }
-      begin
-        widget = JSON.parse(payload.to_s)
-        "\n```json\n#{JSON.pretty_generate(widget)}\n```\n"
-      rescue JSON::ParserError
-        nil
-      end
+      render_widget(payload)
     in { alt: String => alt }
       alt
     else
@@ -1455,6 +1450,55 @@ class ChatGPT2Obsidian
       { content_references: [reference.merge(matched_text: "", start_idx: 0, end_idx: 0)] },
       assets:
     ).first&.last
+  end
+
+  def render_widget(payload)
+    widget = JSON.parse(payload.to_s, symbolize_names: true)
+    case widget
+    in { math_block_widget_always_prefetch_v2: { content: String => math } }
+      # Some widget payloads escape every command backslash twice.
+      if math.match?(/\\\\[A-Za-z]/) && !math.match?(/(?<!\\)(?:\\\\)*\\[A-Za-z]/)
+        math = math.gsub("\\\\", "\\")
+      end
+      "\n$$\n#{math}\n$$\n"
+    in { chart: { content: Hash => content } }
+      render_chart_table(content) || "\n```json\n#{JSON.pretty_generate(widget)}\n```\n"
+    else
+      "\n```json\n#{JSON.pretty_generate(widget)}\n```\n"
+    end
+  rescue JSON::ParserError
+    nil
+  end
+
+  def render_chart_table(content)
+    content in { xKey: String => x_key, series: Array => series, data: Array => data } or return nil
+    return nil if series.empty? || data.empty?
+    return nil unless series.all? { it in { dataKey: String } }
+    return nil unless data.all? { |row| row.is_a?(Hash) && row.key?(x_key.to_sym) }
+    meta = content[:meta] || {}
+    return nil unless meta.is_a?(Hash)
+    keys = [x_key] + series.map { it[:dataKey] }
+    return nil if data.any? { |row|
+      keys.any? { |key| row[key.to_sym].is_a?(Hash) || row[key.to_sym].is_a?(Array) }
+    }
+
+    cell = ->(value) {
+      MD.escape_link_text(CGI.escapeHTML(value.to_s)).gsub("|", "\\|").gsub("&#10;", "<br>")
+    }
+    headers = [x_key] + series.map { it[:label] || it[:dataKey] }
+    lines = []
+    lines << "**#{cell.call(meta[:title])}**\n" if meta[:title]
+    lines << "#{cell.call(meta[:description])}\n" if meta[:description]
+    lines << "| #{headers.map { cell.call(it) }.join(" | ")} |"
+    lines << "| #{headers.map { "---" }.join(" | ")} |"
+    data.each do |row|
+      values = [row[x_key.to_sym]] + series.map { |entry|
+        value = row[entry[:dataKey].to_sym]
+        value.nil? ? "" : "#{value}#{entry[:valueSuffix]}"
+      }
+      lines << "| #{values.map { cell.call(it) }.join(" | ")} |"
+    end
+    "\n#{lines.join("\n")}\n"
   end
 
   def build_grouped_webpages_links(items)
