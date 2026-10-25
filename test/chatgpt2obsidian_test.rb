@@ -105,6 +105,16 @@ class ChatGPT2ObsidianTest < Minitest::Test
     )
   end
 
+  def test_replace_codes_removes_legacy_display_markers
+    metadata = { content_references: [{
+      type: "grouped_webpages", items: [{ title: "Source", url: "https://example.com" }],
+    }] }
+
+    assert_equal ["Text. \\[[Source](https://example.com)\\]\nMore text."], @converter.send(
+      :replace_codes, ["Text. citeturn0search0\nMore text."], metadata, assets: {}
+    )
+  end
+
   def test_replace_codes_preserves_offsetless_references_in_order_across_parts
     metadata = {
       content_references: [

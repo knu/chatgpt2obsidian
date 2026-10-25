@@ -1413,7 +1413,7 @@ class ChatGPT2Obsidian
           ""
         end
       end
-    }
+    }.delete("\u{E203}\u{E204}\u{E206}")
   end
 
   def render_marker_reference(reference, payload, marker_offset:, assets:)
