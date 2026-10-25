@@ -450,39 +450,8 @@ class ChatGPT2Obsidian
     end
 
     mapping = conversation[:mapping] || {}
-    children_by_parent = build_children_by_parent(mapping)
-    root_id = mapping.find { |_, v| v[:parent].nil? }&.first
-    return unless root_id
-
-    order = []
-
-    # Find the latest timestamp in a subtree
-    find_latest_timestamp = ->(mapping, node) {
-      entry = mapping[node] or return 0
-
-      children_by_parent.fetch(node, []).map { |child|
-        find_latest_timestamp.call(mapping, child.to_sym)
-      }.max || entry.dig(:message, :create_time) || 0
-    }
-
-    # Find the main conversation path by selecting the most recent branch at each split
-    find_main_path = ->(node) {
-      case children_by_parent.fetch(node, [])
-      in []
-      in [child]
-        order << child
-        find_main_path.call(child)
-      in _ => children
-        newest_child = children.max_by { |child|
-          find_latest_timestamp.call(mapping, child)
-        }
-
-        order << newest_child
-        find_main_path.call(newest_child)
-      end
-    }
-
-    find_main_path.call(root_id.to_sym)
+    order = conversation_order(mapping, current_node: conversation[:current_node])
+    return if order.empty?
 
     models = order.filter_map { |msg_id|
       mapping[msg_id].dig(:message, :metadata, :model_slug)
@@ -593,6 +562,57 @@ class ChatGPT2Obsidian
 
       existing_file_info[conversation_id] = { file: target, sha256sum: }
     end
+  end
+
+  def conversation_order(mapping, current_node:)
+    children_by_parent = build_children_by_parent(mapping)
+    root_id = mapping.find { |_, v| v[:parent].nil? }&.first
+    return [] unless root_id
+
+    if current_node
+      path = []
+      visited = Set.new
+      node = current_node.to_sym
+      while mapping.key?(node) && visited.add?(node)
+        return path.reverse if node == root_id
+
+        path << node
+        parent = mapping[node][:parent] or break
+        node = parent.to_sym
+      end
+      logger.warn "Invalid current conversation path: \"#{@current_conversation_title}\""
+    end
+
+    order = []
+
+    # Find the latest timestamp in a subtree
+    find_latest_timestamp = ->(mapping, node) {
+      entry = mapping[node] or return 0
+
+      children_by_parent.fetch(node, []).map { |child|
+        find_latest_timestamp.call(mapping, child.to_sym)
+      }.max || entry.dig(:message, :create_time) || 0
+    }
+
+    # Find the main conversation path by selecting the most recent branch at each split
+    find_main_path = ->(node) {
+      case children_by_parent.fetch(node, [])
+      in []
+      in [child]
+        order << child
+        find_main_path.call(child)
+      in _ => children
+        newest_child = children.max_by { |child|
+          find_latest_timestamp.call(mapping, child)
+        }
+
+        order << newest_child
+        find_main_path.call(newest_child)
+      end
+    }
+
+    find_main_path.call(root_id.to_sym)
+    order
   end
 
   def determine_target_file(title, conversation_id)

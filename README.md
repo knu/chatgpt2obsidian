@@ -230,7 +230,7 @@ The script handles various ChatGPT content types:
 - **Maps**: Exported as generated location notes plus embedded Obsidian Bases Map views
 - **Code execution**: Search queries and reasoning recaps
 - **Model information**: Shows the model name for each ChatGPT response and includes all model names in frontmatter
-- **Message filtering**: Filters out edited conversation branches using timestamp-based selection
+- **Message filtering**: Follows the selected conversation branch saved in the export, with timestamp-based selection as a fallback
 
 ## File Naming
 

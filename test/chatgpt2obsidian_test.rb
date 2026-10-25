@@ -7,6 +7,32 @@ class ChatGPT2ObsidianTest < Minitest::Test
     @converter = ChatGPT2Obsidian.new
   end
 
+  def test_conversation_order_follows_the_selected_branch
+    mapping = {
+      root: { parent: nil },
+      question: { parent: "root", message: { create_time: 1 } },
+      selected: { parent: "question", message: { create_time: 2 } },
+      newer: { parent: "question", message: { create_time: 3 } },
+    }
+
+    assert_equal %i[question selected], @converter.send(:conversation_order, mapping, current_node: "selected")
+    assert_equal %i[question newer], @converter.send(:conversation_order, mapping, current_node: nil)
+  end
+
+  def test_conversation_order_falls_back_for_an_invalid_selected_path
+    mapping = {
+      root: { parent: nil },
+      answer: { parent: "root", message: { create_time: 1 } },
+      cycle: { parent: "cycle" },
+    }
+
+    assert_output(nil, /Invalid current conversation path/) do
+      %w[missing cycle].each do |current_node|
+        assert_equal [:answer], @converter.send(:conversation_order, mapping, current_node:)
+      end
+    end
+  end
+
   def test_replace_codes_resolves_citation_markers_without_offsets
     metadata = {
       content_references: [
