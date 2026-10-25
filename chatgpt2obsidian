@@ -1285,6 +1285,7 @@ class ChatGPT2Obsidian
 
   def replace_codes(parts, metadata, assets:)
     replacements = build_code_replacements(metadata, assets:)
+    reference_queue = build_reference_queue(metadata)
 
     parts.map { |part|
       case part
@@ -1295,7 +1296,7 @@ class ChatGPT2Obsidian
         rescue RangeError
           logger.warn "Skipping an invalid code replacement at #{start_idx}...#{end_idx}: \"#{@current_conversation_title}\""
         end
-        replace_reference_markers(result, metadata)
+        replace_reference_markers(result, metadata, assets:, reference_queue:)
       else
         logger.warn "Non-text part is found: #{part.inspect}: \"#{@current_conversation_title}\""
         part
@@ -1303,8 +1304,30 @@ class ChatGPT2Obsidian
     }
   end
 
-  def replace_reference_markers(text, metadata)
+  def build_reference_queue(metadata)
+    metadata.fetch(:content_references, []).reject {
+      it.key?(:start_idx) && it.key?(:end_idx)
+    }
+  end
+
+  def take_marker_reference(queue, marker_type)
+    types = case marker_type
+    when "cite" then %w[grouped_webpages grouped_webpages_model_predicted_fallback]
+    when "entity" then %w[entity alt_text product_entity]
+    when "url", "link_title" then [marker_type, "alt_text"]
+    when "filecite" then %w[file]
+    when "i" then %w[image_v2]
+    when "navlist" then %w[nav_list]
+    when "genui" then %w[client_defined_widget]
+    else [marker_type]
+    end
+    index = queue.index { types.include?(it[:type]) || it[:type] == "hidden" }
+    queue.delete_at(index) if index
+  end
+
+  def replace_reference_markers(text, metadata, assets: {}, reference_queue: nil)
     references = metadata.fetch(:content_references, [])
+    reference_queue ||= build_reference_queue(metadata)
 
     # Recent exports omit start_idx/end_idx and identify citations by their
     # turn/reference IDs instead.
@@ -1333,6 +1356,9 @@ class ChatGPT2Obsidian
         next ""
       end
 
+      marker_offset = Regexp.last_match.begin(0)
+      reference = take_marker_reference(reference_queue, marker_type)
+
       case marker_type
       in "cite"
         next "" if payload.nil?
@@ -1343,11 +1369,42 @@ class ChatGPT2Obsidian
         next "" if items.empty?
 
         "#{prefix}#{build_grouped_webpages_links(items)}"
-      else
-        logger.warn "Unsupported content reference marker `#{marker_type}`: \"#{@current_conversation_title}\""
+      in "entity_metadata" | "memcite" | "link"
         ""
+      else
+        next "" if reference in { type: "hidden" }
+
+        replacement = reference && render_marker_reference(reference, payload, marker_offset:, assets:)
+        if replacement
+          "#{prefix}#{replacement}"
+        else
+          logger.warn "Unsupported content reference marker `#{marker_type}`: \"#{@current_conversation_title}\""
+          ""
+        end
       end
     }
+  end
+
+  def render_marker_reference(reference, payload, marker_offset:, assets:)
+    case reference
+    in { type: "map", entities: }
+      start_idx = "#{marker_offset}:#{@current_map_exports.size}"
+      build_bases_map_embed(entities:, refs: reference.fetch(:refs, []), start_idx:)
+    in { type: "client_defined_widget" }
+      begin
+        widget = JSON.parse(payload.to_s)
+        "\n```json\n#{JSON.pretty_generate(widget)}\n```\n"
+      rescue JSON::ParserError
+        nil
+      end
+    in { alt: String => alt }
+      alt
+    else
+      build_code_replacements(
+        { content_references: [reference.merge(matched_text: "", start_idx: 0, end_idx: 0)] },
+        assets:
+      ).first&.last
+    end
   end
 
   def build_grouped_webpages_links(items)
