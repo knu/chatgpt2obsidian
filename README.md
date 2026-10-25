@@ -223,6 +223,7 @@ pry
 The script handles various ChatGPT content types:
 
 - **Text messages**: Standard user and assistant conversations
+- **Display math**: Converts standalone `\[` and `\]` delimiters to `$$` outside code, HTML, and links
 - **Source links**: Proper reference links embedded in response messages
 - **Thoughts**: Internal reasoning including chains of thought displayed in expandable blocks
 - **Web search results**: Included within Thoughts blocks

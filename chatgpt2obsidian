@@ -34,10 +34,12 @@ gemfile do
   gem "rack"
   gem "rubyzip"
   gem "logger"
+  gem "commonmarker"
   gem "debug" if ENV["DEBUG"]
 end
 
 require "cgi"
+require "commonmarker"
 require "debug" if ENV["DEBUG"]
 require "digest"
 require "fileutils"
@@ -148,6 +150,42 @@ module MD
         "[#{image(alt:, src:, title:)}](#{escape_href(href)})"
       end
     end
+  end
+
+  def normalize_display_math(text)
+    return text unless text.include?("\\[") && text.include?("\\]")
+
+    lines = text.lines
+    offsets = [0]
+    lines.each { offsets << offsets.last + it.length }
+    protected_ranges = []
+    Commonmarker.parse(text, options: { parse: { sourcepos_chars: true } }).walk do |node|
+      next unless %i[code code_block html_inline html_block link image].include?(node.type)
+
+      position = node.source_position
+      start_idx = offsets[position[:start_line] - 1] + position[:start_column] - 1
+      end_idx = offsets[position[:end_line] - 1] + position[:end_column]
+      protected_ranges << (start_idx...end_idx)
+    end
+
+    replacements = []
+    opening = nil
+    lines.each_with_index do |line, index|
+      match = /\A(?<prefix>[ \t]*(?:>[ \t]*)*)(?<delimiter>\\[\[\]])[ \t]*\r?\n?\z/.match(line) or next
+      offset = offsets[index] + match.begin(:delimiter)
+      next if protected_ranges.any? { it.cover?(offset) }
+
+      if match[:delimiter] == "\\["
+        opening = [offset, match[:prefix]]
+      elsif opening && opening.last == match[:prefix]
+        replacements.concat([opening.first, offset])
+        opening = nil
+      end
+    end
+
+    result = text.dup
+    replacements.reverse_each { |offset| result[offset, 2] = "$$" }
+    result
   end
 end
 
@@ -494,6 +532,8 @@ class ChatGPT2Obsidian
 
         begin
           type = process_message_entry(buf, entry, assets:) or next
+          buf.string = MD.normalize_display_math(buf.string)
+          buf.seek(0, IO::SEEK_END)
 
           case
           when type == :user && last_type != :user

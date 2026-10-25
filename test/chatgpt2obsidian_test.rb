@@ -140,15 +140,37 @@ class ChatGPT2ObsidianTest < Minitest::Test
   end
 
   def test_math_widgets_render_commands_without_changing_row_separators
-    ["y=\\\\frac{5}{15}x", "y=\\frac{5}{15}x"].each do |content|
+    ["a=\\\\frac{1}{2}", "a=\\frac{1}{2}"].each do |content|
       payload = JSON.generate(math_block_widget_always_prefetch_v2: { content: })
       result = @converter.send(:render_widget, payload)
-      assert_equal "\n$$\ny=\\frac{5}{15}x\n$$\n", result
+      assert_equal "\n$$\na=\\frac{1}{2}\n$$\n", result
     end
     content = "\\begin{matrix}1 & 2\\\\3 & 4\\end{matrix}"
     assert_includes @converter.send(:render_widget, JSON.generate(math_block_widget_always_prefetch_v2: { content: })), content
     escaped = content.gsub("\\", "\\\\")
     assert_includes @converter.send(:render_widget, JSON.generate(math_block_widget_always_prefetch_v2: { content: escaped })), content
+  end
+
+  def test_display_math_delimiters_are_converted_without_changing_the_formula
+    text = "Example.\n\n\\[\nx^2 + y^2 = z^2\n\\]\n"
+    expected = "Example.\n\n$$\nx^2 + y^2 = z^2\n$$\n"
+
+    assert_equal expected, MD.normalize_display_math(text)
+    assert_equal expected, MD.normalize_display_math(expected)
+    assert_equal "> $$\n> x\n> $$\n", MD.normalize_display_math("> \\[\n> x\n> \\]\n")
+  end
+
+  def test_display_math_conversion_preserves_code_html_and_unmatched_delimiters
+    samples = [
+      "````markdown\n```\n\\[\nx\n\\]\n```\n````\n",
+      "~~~text\n\\[\nx\n\\]\n~~~\n",
+      "    \\[\n    x\n    \\]\n",
+      "π `example\n\\[\nx\n\\]\nend`\n",
+      "<pre>\n\\[\nx\n\\]\n</pre>\n",
+      "\\[\nx\n",
+      "\\]\n",
+    ]
+    samples.each { assert_equal it, MD.normalize_display_math(it) }
   end
 
   def test_chart_widgets_render_series_as_an_escaped_table
