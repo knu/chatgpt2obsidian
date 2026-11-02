@@ -5,9 +5,15 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    environment:
+      name: docker-hub
+      url: https://hub.docker.com/r/akinori/chatgpt2obsidian/tags
 
     steps:
     - name: Checkout code
