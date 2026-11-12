@@ -30,7 +30,7 @@
 require "bundler/inline"
 
 gemfile do
-  source "https://rubygems.org"
+  source "https://rubygems.org", cooldown: 7
   gem "rack"
   gem "rubyzip"
   gem "logger"
